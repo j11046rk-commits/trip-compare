@@ -1,5 +1,8 @@
 // ---- 設定 ----
 const S = { trip: 'roundtrip', seat: 'ord', book: 'normal', air: 'fsc', priority: 'balanced' };
+const P = { mode: null, timeType: 'depart' };
+let G = { o: null, d: null, rd: 0, ld: 0 };
+let _scheds = [];
 
 // ---- ユーティリティ ----
 function hav(la1, lo1, la2, lo2) {
@@ -10,6 +13,11 @@ function hav(la1, lo1, la2, lo2) {
 const fmt  = n => Math.round(n).toLocaleString('ja-JP');
 const fmtM = m => { if (!m && m !== 0) return '—'; const h = Math.floor(m / 60), mn = m % 60; return h > 0 ? `${h}時間${mn > 0 ? mn + '分' : ''}` : `${mn}分`; };
 const opp  = (min, rate, h, pax) => h > 0 ? (min / 60) * h * rate * pax : 0;
+
+// ---- 時刻ユーティリティ ----
+function parseMin(s) { const [h, m] = s.split(':').map(Number); return h * 60 + m; }
+function toHHMM(m) { m = ((m % 1440) + 1440) % 1440; return `${String(~~(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
+function toJP(m) { m = ((m % 1440) + 1440) % 1440; const h = ~~(m / 60), mn = m % 60; return `${h}時${mn ? mn + '分' : '00分'}`; }
 
 // ---- 料金テーブル ----
 function shinkFare(km) {
@@ -37,6 +45,69 @@ function getCity(side) {
 
 // ---- 新幹線ハブ駅名 (hubStt → 駅名) ----
 const HUB_NAME = { 0:'東京', 36:'上野', 99:'名古屋', 138:'新大阪', 170:'新神戸', 202:'岡山', 231:'広島', 256:'新山口', 280:'小倉', 295:'博多', 34:'大宮', 84:'仙台', 161:'新青森', 208:'新函館北斗', 110:'新潟', 75:'長野', 65:'高崎', 200:'鹿児島中央' };
+
+// ---- 新幹線駅名取得 ----
+function shinkStn(c) {
+  if (c.stt !== null && HUB_NAME[c.stt]) return HUB_NAME[c.stt] + '駅';
+  if (c.stt !== null) return c.l + '駅';
+  if (HUB_NAME[c.hubStt]) return HUB_NAME[c.hubStt] + '駅';
+  const hubs = Object.keys(HUB_NAME).map(Number);
+  const closest = hubs.reduce((p, cur) => Math.abs(cur - c.hubStt) < Math.abs(p - c.hubStt) ? cur : p);
+  return HUB_NAME[closest] + '駅';
+}
+
+// ---- 空港情報 ----
+const AP = {
+  '北海道': { name: '新千歳空港', access: 40 },
+  '青森県': { name: '青森空港', access: 35 },
+  '岩手県': { name: '花巻空港', access: 40 },
+  '宮城県': { name: '仙台空港', access: 30 },
+  '秋田県': { name: '秋田空港', access: 30 },
+  '山形県': { name: '山形空港', access: 25 },
+  '福島県': { name: '福島空港', access: 40 },
+  '茨城県': { name: '茨城空港', access: 30 },
+  '栃木県': { name: '羽田空港', access: 100 },
+  '群馬県': { name: '羽田空港', access: 110 },
+  '埼玉県': { name: '羽田空港', access: 70 },
+  '千葉県': { name: '成田空港', access: 45 },
+  '東京都': { name: '羽田空港', access: 40 },
+  '神奈川県': { name: '羽田空港', access: 45 },
+  '新潟県': { name: '新潟空港', access: 25 },
+  '富山県': { name: '富山きときと空港', access: 20 },
+  '石川県': { name: '小松空港', access: 35 },
+  '福井県': { name: '小松空港', access: 60 },
+  '山梨県': { name: '羽田空港', access: 120 },
+  '長野県': { name: '信州まつもと空港', access: 25 },
+  '岐阜県': { name: '中部国際空港', access: 60 },
+  '静岡県': { name: '富士山静岡空港', access: 35 },
+  '愛知県': { name: '中部国際空港', access: 40 },
+  '三重県': { name: '中部国際空港', access: 70 },
+  '滋賀県': { name: '関西国際空港', access: 70 },
+  '京都府': { name: '伊丹空港', access: 45 },
+  '大阪府': { name: '伊丹空港', access: 30 },
+  '兵庫県': { name: '伊丹空港', access: 35 },
+  '奈良県': { name: '関西国際空港', access: 75 },
+  '和歌山県': { name: '関西国際空港', access: 70 },
+  '鳥取県': { name: '鳥取砂丘コナン空港', access: 25 },
+  '島根県': { name: '出雲縁結び空港', access: 25 },
+  '岡山県': { name: '岡山桃太郎空港', access: 30 },
+  '広島県': { name: '広島空港', access: 45 },
+  '山口県': { name: '山口宇部空港', access: 35 },
+  '徳島県': { name: '徳島阿波おどり空港', access: 30 },
+  '香川県': { name: '高松空港', access: 30 },
+  '愛媛県': { name: '松山空港', access: 20 },
+  '高知県': { name: '高知龍馬空港', access: 25 },
+  '福岡県': { name: '福岡空港', access: 15 },
+  '佐賀県': { name: '佐賀空港', access: 40 },
+  '長崎県': { name: '長崎空港', access: 40 },
+  '熊本県': { name: '阿蘇くまもと空港', access: 50 },
+  '大分県': { name: '大分空港', access: 50 },
+  '宮崎県': { name: '宮崎ブーゲンビリア空港', access: 20 },
+  '鹿児島県': { name: '鹿児島空港', access: 40 },
+  '沖縄県': { name: '那覇空港', access: 20 },
+};
+function apName(pref) { return (AP[pref] || { name: '最寄り空港' }).name; }
+function apAccess(pref) { return (AP[pref] || { access: 60 }).access; }
 
 // ---- 交通手段判定 ----
 const canShink = (o, d) => o.hubStt !== null && d.hubStt !== null;
@@ -122,6 +193,13 @@ function togP(v, btn) {
   btn.classList.add('on');
 }
 
+function togPlan(type, btn) {
+  P.timeType = type;
+  btn.closest('.tg').querySelectorAll('.tb').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('plan-time-label').textContent = type === 'arrive' ? '到着希望時刻' : '出発予定時刻';
+}
+
 // ---- スコア計算 ----
 function scoreF(r, mC, mT, mO) {
   const cn = mC > 0 ? 1 - r.tc / mC : 1;
@@ -160,7 +238,6 @@ function calc() {
   // 新幹線
   if (canShink(o, d)) {
     const st = shinkMin1(o, d), tm = st * trips;
-    // 在来線アクセス区間の距離相当分を加算（四国等の乗換ルートで実距離に近づける）
     const accessKm = (o.stt === null ? (o.sam || 0) : 0) + (d.stt === null ? (d.sam || 0) : 0);
     const fare = shinkFare(Math.round(ld * 1.2 + accessKm)) * gM * bD + ((o.sam > 0 ? 1000 : 0) + (d.sam > 0 ? 1000 : 0));
     const tc = fare * pax * trips;
@@ -267,6 +344,195 @@ function calc() {
   mkC('oc2', r => r.two, r => `¥${fmt(r.two)}`);
 
   document.getElementById('results').className = 'res show';
+
+  // ---- プラン作成セクション更新 ----
+  G = { o, d, rd, ld };
+  document.getElementById('plan-modes').innerHTML = results.map(r => `
+    <button class="plan-mode-btn${r.id === winner.id ? ' rec' : ''}" data-mode="${r.id}" onclick="selectTransport('${r.id}')">
+      ${r.id === winner.id ? '<span class="pmb-badge">おすすめ</span>' : ''}
+      <span class="pmb-icon">${r.icon}</span>
+      <span class="pmb-name">${r.name}</span>
+    </button>`).join('');
+  document.getElementById('plan-section').style.display = 'block';
+  document.getElementById('plan-step3').style.display = 'none';
+  document.getElementById('plan-step4').style.display = 'none';
+  document.getElementById('plan-step5').style.display = 'none';
+  P.mode = null;
+  document.querySelectorAll('.plan-mode-btn').forEach(b => b.classList.remove('on'));
+  const today = new Date();
+  document.getElementById('plan-date').value = today.toISOString().split('T')[0];
+}
+
+// ---- 交通手段選択 ----
+function selectTransport(modeId) {
+  P.mode = modeId;
+  document.querySelectorAll('.plan-mode-btn').forEach(b => b.classList.toggle('on', b.dataset.mode === modeId));
+  document.getElementById('plan-step3').style.display = 'block';
+  document.getElementById('plan-step4').style.display = 'none';
+  document.getElementById('plan-step5').style.display = 'none';
+  document.getElementById('plan-step3').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ---- スケジュール生成 ----
+function genShinkSchedules(o, d, isArr, tMin) {
+  const oH = o.stt !== null ? o.stt : o.hubStt;
+  const dH = d.stt !== null ? d.stt : d.hubStt;
+  const rideMin = Math.max(Math.abs(oH - dH), 15);
+  const accO = (o.sam || 0) + 10;
+  const accD = (d.sam || 0);
+  const oStn = shinkStn(o), dStn = shinkStn(d);
+  const freq = rideMin < 90 ? 15 : rideMin < 180 ? 20 : 30;
+  const totalMin = accO + rideMin + accD;
+  const baseCityDep = isArr ? tMin - totalMin : tMin;
+  const baseShinkDep = baseCityDep + accO;
+  const scheds = [];
+  for (let off = -2; off <= 2; off++) {
+    const shinkDep = Math.round(baseShinkDep / freq) * freq + off * freq;
+    if (shinkDep < 6 * 60 || shinkDep > 23 * 60) continue;
+    const cityDep = shinkDep - accO;
+    if (cityDep < 5 * 60) continue;
+    const shinkArr = shinkDep + rideMin;
+    const cityArr = shinkArr + accD;
+    const steps = [];
+    steps.push([toHHMM(cityDep), `${o.l}出発`]);
+    if ((o.sam || 0) > 0) steps.push([toHHMM(cityDep + (o.sam || 0)), `${oStn}到着`]);
+    steps.push([toHHMM(shinkDep), `${oStn}発（新幹線）`]);
+    steps.push([toHHMM(shinkArr), `${dStn}着`]);
+    if ((d.sam || 0) > 0) steps.push([toHHMM(cityArr), `${d.l}到着`]);
+    scheds.push({
+      type: 'shink',
+      depTime: toHHMM(cityDep),
+      arrTime: toHHMM(cityArr),
+      rideOnly: `新幹線 ${toHHMM(shinkDep)}発 → ${toHHMM(shinkArr)}着`,
+      totalMin,
+      steps,
+      goTo: { time: toJP(cityDep), name: oStn },
+    });
+  }
+  return scheds;
+}
+
+function genAirSchedules(o, d, isArr, tMin, ld) {
+  const flightMin = Math.max(40, Math.round(ld / 8));
+  const accO = apAccess(o.pref);
+  const accD = apAccess(d.pref);
+  const buf = 60;
+  const oAp = apName(o.pref), dAp = apName(d.pref);
+  const totalMin = accO + buf + flightMin + accD;
+  const baseCityDep = isArr ? tMin - totalMin : tMin;
+  const baseFlightDep = baseCityDep + accO + buf;
+  const freq = 120;
+  const scheds = [];
+  for (let off = -2; off <= 2; off++) {
+    const flightDep = Math.round(baseFlightDep / freq) * freq + off * freq;
+    if (flightDep < 6 * 60 || flightDep > 22 * 60) continue;
+    const cityDep = flightDep - accO - buf;
+    if (cityDep < 4 * 60) continue;
+    const flightArr = flightDep + flightMin;
+    const cityArr = flightArr + accD;
+    scheds.push({
+      type: 'fly',
+      depTime: toHHMM(cityDep),
+      arrTime: toHHMM(cityArr),
+      rideOnly: `フライト ${toHHMM(flightDep)}発 → ${toHHMM(flightArr)}着（約${flightMin}分）`,
+      totalMin,
+      goTo: { time: toJP(cityDep), name: oAp },
+      steps: [
+        [toHHMM(cityDep), `${o.l}出発`],
+        [toHHMM(cityDep + accO), `${oAp}到着・チェックイン`],
+        [toHHMM(flightDep - 20), `搭乗ゲートへ移動`],
+        [toHHMM(flightDep), `${oAp}発（フライト 約${flightMin}分）`],
+        [toHHMM(flightArr), `${dAp}着`],
+        [toHHMM(cityArr), `${d.l}到着`],
+      ],
+    });
+  }
+  return scheds;
+}
+
+function genCarSchedule(o, d, isArr, tMin, rd) {
+  const driveMin = Math.round((rd / 80) * 60);
+  const prepMin = 15;
+  const totalMin = prepMin + driveMin;
+  const cityDep = isArr ? tMin - totalMin : tMin;
+  const cityArr = cityDep + totalMin;
+  return [{
+    type: 'car',
+    depTime: toHHMM(cityDep),
+    arrTime: toHHMM(cityArr),
+    rideOnly: `高速・一般道 約${rd}km / 約${driveMin}分`,
+    totalMin,
+    goTo: { time: toJP(cityDep), name: o.l },
+    steps: [
+      [toHHMM(cityDep), `出発準備完了`],
+      [toHHMM(cityDep + prepMin), `${o.l}出発（高速道路へ）`],
+      [toHHMM(cityArr), `${d.l}到着（予定）`],
+    ],
+  }];
+}
+
+// ---- 便検索 ----
+function searchSchedule() {
+  if (!P.mode) { alert('交通手段を選択してください'); return; }
+  const timeStr = document.getElementById('plan-time').value;
+  if (!timeStr) { alert('時刻を入力してください'); return; }
+  const tMin = parseMin(timeStr);
+  const isArr = P.timeType === 'arrive';
+  const { o, d, rd, ld } = G;
+  let scheds = [];
+  if (P.mode === 'shink') scheds = genShinkSchedules(o, d, isArr, tMin);
+  else if (P.mode === 'fly') scheds = genAirSchedules(o, d, isArr, tMin, ld);
+  else if (P.mode === 'car') scheds = genCarSchedule(o, d, isArr, tMin, rd);
+  _scheds = scheds;
+  renderSchedules(scheds);
+}
+
+function renderSchedules(scheds) {
+  const el = document.getElementById('schedule-list');
+  if (!scheds.length) {
+    el.innerHTML = '<p class="note" style="padding:.75rem 0;">この時間帯の便が見つかりません。別の時刻をお試しください。</p>';
+    document.getElementById('plan-step4').style.display = 'block';
+    return;
+  }
+  el.innerHTML = scheds.map((s, i) => `
+    <div class="sched-card" onclick="pickSchedule(${i})">
+      <div class="sched-hdr">
+        <span class="sched-time">${s.depTime} <span class="sched-arr">→</span> ${s.arrTime}</span>
+        <span class="sched-dur">${fmtM(s.totalMin)}</span>
+      </div>
+      <div class="sched-ride">${s.rideOnly}</div>
+    </div>
+  `).join('');
+  document.getElementById('plan-step4').style.display = 'block';
+  document.getElementById('plan-step5').style.display = 'none';
+  document.getElementById('plan-step4').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ---- 便選択 → 最終ガイド ----
+function pickSchedule(idx) {
+  document.querySelectorAll('.sched-card').forEach((c, i) => c.classList.toggle('selected', i === idx));
+  const s = _scheds[idx];
+  const itin = s.steps.map(([t, l]) => `
+    <div class="it-row">
+      <div class="it-time">${t}</div>
+      <div class="it-lbl">${l}</div>
+    </div>`).join('');
+  document.getElementById('final-guide').innerHTML = `
+    <div class="final-box">
+      <div class="final-title">✅ 出発プランが確定しました</div>
+      <div class="final-main">
+        <div class="final-at">${s.goTo.time}に</div>
+        <div class="final-dest">${s.goTo.name}</div>
+        <div class="final-cta">に向かってください</div>
+      </div>
+      <div class="final-itin">
+        <div class="itin-ttl">📋 行程</div>
+        ${itin}
+      </div>
+      <p class="note">※時刻は概算です。実際の便・時刻は各交通機関の公式サイトでご確認ください。</p>
+    </div>`;
+  document.getElementById('plan-step5').style.display = 'block';
+  document.getElementById('plan-step5').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ---- 初期化 ----

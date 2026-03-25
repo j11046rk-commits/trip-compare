@@ -140,6 +140,56 @@
       <div class="cw"><div class="ct">⏱ 総所要時間</div><div id="tc2"></div></div>
       <div class="cw"><div class="ct">🧠 機会損失込み総コスト（円）</div><div id="oc2"></div></div>
       <p class="note">※料金は概算です。実際の価格は各予約サイトでご確認ください。</p>
+
+      <!-- プラン作成 -->
+      <div id="plan-section" style="display:none;">
+        <div class="divider"></div>
+        <div class="plan-hdr">🗓 出発プランを作成</div>
+
+        <!-- ① 交通手段を選択 -->
+        <div class="plan-block">
+          <div class="plan-step-lbl">① 交通手段を選択</div>
+          <div class="plan-modes" id="plan-modes"></div>
+        </div>
+
+        <!-- ② 時刻を入力 -->
+        <div id="plan-step3" style="display:none;">
+          <div class="plan-block">
+            <div class="plan-step-lbl">② 日付と時刻を入力</div>
+            <div class="r2" style="margin-bottom:10px;">
+              <div class="field">
+                <label>日付</label>
+                <input type="date" id="plan-date">
+              </div>
+              <div class="field">
+                <label>時刻タイプ</label>
+                <div class="tg">
+                  <div class="tb on" onclick="togPlan('depart',this)">出発時刻</div>
+                  <div class="tb" onclick="togPlan('arrive',this)">到着希望</div>
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label id="plan-time-label">出発予定時刻</label>
+              <input type="time" id="plan-time" value="09:00" class="time-input">
+            </div>
+            <button class="cbtn" onclick="searchSchedule()">🔍 便を検索</button>
+          </div>
+        </div>
+
+        <!-- ③ 便を選択 -->
+        <div id="plan-step4" style="display:none;">
+          <div class="plan-block">
+            <div class="plan-step-lbl">③ 便を選択</div>
+            <div id="schedule-list"></div>
+          </div>
+        </div>
+
+        <!-- ④ 最終ガイド -->
+        <div id="plan-step5" style="display:none;">
+          <div id="final-guide"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

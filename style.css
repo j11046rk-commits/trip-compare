@@ -289,6 +289,165 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 
 .note { font-size: 10px; color: var(--text3); margin-top: .5rem; text-align: center; }
 
+/* ---- プラン作成セクション ---- */
+.plan-hdr {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 1rem;
+}
+
+.plan-block {
+  margin-bottom: 1.25rem;
+}
+
+.plan-step-lbl {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text3);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 9px;
+}
+
+/* 交通手段ボタン */
+.plan-modes {
+  display: flex;
+  gap: 8px;
+}
+
+.plan-mode-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 12px 8px 10px;
+  border: 0.5px solid var(--border2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text2);
+  cursor: pointer;
+  position: relative;
+  transition: all .15s;
+  font-family: inherit;
+}
+.plan-mode-btn:hover { background: var(--bg2); }
+.plan-mode-btn.on {
+  border-color: var(--info-text);
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+.plan-mode-btn.rec { border-color: var(--info-text); }
+
+.pmb-badge {
+  position: absolute;
+  top: -9px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--info-text);
+  color: white;
+  font-size: 9px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.pmb-icon { font-size: 20px; }
+.pmb-name { font-size: 12px; font-weight: 500; }
+
+/* 時刻入力 */
+.time-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 20px;
+  font-weight: 500;
+  border: 0.5px solid var(--border2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+/* スケジュールカード */
+.sched-card {
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: .75rem;
+  margin-bottom: 7px;
+  cursor: pointer;
+  background: var(--bg);
+  transition: background .12s, border-color .12s;
+}
+.sched-card:hover { background: var(--bg2); }
+.sched-card.selected {
+  border-color: var(--success);
+  background: var(--bg2);
+}
+
+.sched-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3px;
+}
+.sched-time { font-size: 16px; font-weight: 600; color: var(--text); }
+.sched-arr  { color: var(--text3); font-weight: 400; }
+.sched-dur  { font-size: 11px; color: var(--text2); background: var(--bg3); padding: 2px 8px; border-radius: 20px; }
+.sched-ride { font-size: 11px; color: var(--text3); }
+
+/* 最終ガイド */
+.final-box {
+  background: var(--bg2);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  border: 0.5px solid var(--border);
+}
+
+.final-title {
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: .75rem;
+}
+
+.final-main {
+  text-align: center;
+  padding: 1.25rem 1rem;
+  background: var(--bg);
+  border-radius: var(--radius);
+  border: 1.5px solid var(--info-text);
+  margin-bottom: 1rem;
+}
+.final-at   { font-size: 13px; color: var(--text2); margin-bottom: 2px; }
+.final-dest {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 6px 0 4px;
+  line-height: 1.2;
+}
+.final-cta  { font-size: 15px; color: var(--info-text); font-weight: 500; }
+
+.final-itin {
+  background: var(--bg);
+  border-radius: var(--radius);
+  border: 0.5px solid var(--border);
+  padding: .75rem;
+  margin-bottom: .75rem;
+}
+.itin-ttl { font-size: 12px; color: var(--text2); margin-bottom: .5rem; font-weight: 500; }
+
+.it-row {
+  display: flex;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 0.5px solid var(--border);
+  font-size: 12px;
+}
+.it-row:last-child { border-bottom: none; }
+.it-time { color: var(--text2); min-width: 42px; font-variant-numeric: tabular-nums; font-weight: 500; }
+.it-lbl  { color: var(--text); }
+
 @media (max-width: 480px) {
   body { padding: .5rem; }
   .container { border-radius: var(--radius); }
