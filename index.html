@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>出張交通手段比較</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🗾 出張交通手段比較</h1>
+    <p>新幹線 / 飛行機 / 自家用車を費用・時間・機会損失で比較</p>
+  </header>
+  <div class="main">
+    <div class="tabs">
+      <div class="tab on" onclick="sw('basic')">基本設定</div>
+      <div class="tab" onclick="sw('adv')">詳細設定</div>
+    </div>
+
+    <!-- 基本設定 -->
+    <div id="tb-basic">
+      <div class="slbl">出発地 → 目的地</div>
+      <div class="od-grid">
+        <div>
+          <div class="od-lbl">📍 出発地 都道府県</div>
+          <select id="op" onchange="onPref('o')"></select>
+        </div>
+        <div class="swap" onclick="swapOD()" title="入れ替え">⇄</div>
+        <div>
+          <div class="od-lbl">🏁 目的地 都道府県</div>
+          <select id="dp" onchange="onPref('d')"></select>
+        </div>
+      </div>
+      <div class="od-grid" style="margin-bottom:6px;">
+        <div>
+          <div class="od-lbl">市・区</div>
+          <select id="oc" onchange="updateInfo()" disabled></select>
+        </div>
+        <div></div>
+        <div>
+          <div class="od-lbl">市・区</div>
+          <select id="dc" onchange="updateInfo()" disabled></select>
+        </div>
+      </div>
+      <div id="irow" class="irow" style="display:none;">
+        <div class="ic" id="oi"></div>
+        <div class="im">→</div>
+        <div class="ic" id="di"></div>
+      </div>
+
+      <div class="hl">
+        <label>⏱ 自分の時給（機会損失スコアに反映）</label>
+        <input type="number" id="hourly" value="3000" min="0">
+        <p class="tip">新幹線40% / 飛行機70% / 車100% の生産性ロスで機会損失を算出</p>
+      </div>
+
+      <div class="r2" style="margin-bottom:11px;">
+        <div class="field">
+          <label>人数</label>
+          <input type="number" id="pax" value="1" min="1" max="10">
+        </div>
+        <div class="field">
+          <label>往復 / 片道</label>
+          <div class="tg">
+            <div class="tb on" onclick="tog('trip','roundtrip',this)">往復</div>
+            <div class="tb" onclick="tog('trip','oneway',this)">片道</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slbl">スコアの優先項目</div>
+      <div class="tg" style="margin-bottom:1rem;">
+        <div class="tb on" onclick="togP('balanced',this)">バランス</div>
+        <div class="tb" onclick="togP('cost',this)">費用</div>
+        <div class="tb" onclick="togP('time',this)">時間</div>
+        <div class="tb" onclick="togP('comfort',this)">快適性</div>
+        <div class="tb" onclick="togP('opp',this)">機会損失</div>
+      </div>
+      <button class="cbtn" onclick="calc()">比較する</button>
+    </div>
+
+    <!-- 詳細設定 -->
+    <div id="tb-adv" style="display:none;">
+      <div class="slbl">新幹線</div>
+      <div class="r2" style="margin-bottom:11px;">
+        <div class="field">
+          <label>座席クラス</label>
+          <div class="tg">
+            <div class="tb on" onclick="tog('seat','ord',this)">普通車</div>
+            <div class="tb" onclick="tog('seat','grn',this)">グリーン車</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>購入方法</label>
+          <div class="tg">
+            <div class="tb on" onclick="tog('book','normal',this)">通常</div>
+            <div class="tb" onclick="tog('book','early',this)">早割</div>
+            <div class="tb" onclick="tog('book','smart',this)">EX予約</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="slbl">飛行機</div>
+      <div class="r2" style="margin-bottom:11px;">
+        <div class="field">
+          <label>航空会社</label>
+          <div class="tg">
+            <div class="tb on" onclick="tog('air','fsc',this)">ANA/JAL</div>
+            <div class="tb" onclick="tog('air','lcc',this)">LCC</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>空港アクセス合計（円/人）</label>
+          <input type="number" id="airAccess" value="0" min="0">
+          <p class="tip" style="color:var(--text3);">出発・到着空港のアクセス費合計</p>
+        </div>
+      </div>
+
+      <div class="slbl">自家用車</div>
+      <div class="r3" style="margin-bottom:11px;">
+        <div class="field"><label>燃費 km/L</label><input type="number" id="mpg" value="15" min="1"></div>
+        <div class="field"><label>ガソリン 円/L</label><input type="number" id="gasp" value="170" min="1"></div>
+        <div class="field"><label>高速料金（片道）</label><input type="number" id="toll" value="0" min="0"></div>
+      </div>
+      <div class="r2" style="margin-bottom:11px;">
+        <div class="field"><label>駐車場代 円/日</label><input type="number" id="park" value="1500" min="0"></div>
+        <div class="field"><label>宿泊日数</label><input type="number" id="nights" value="0" min="0" max="14"></div>
+      </div>
+      <button class="cbtn" onclick="calc()">比較する</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- 結果 -->
+    <div class="res" id="results">
+      <div class="wbox" id="wbox"></div>
+      <div class="cards" id="cards"></div>
+      <div class="cw"><div class="ct">💴 実費比較（円）</div><div id="cc"></div></div>
+      <div class="cw"><div class="ct">⏱ 総所要時間</div><div id="tc2"></div></div>
+      <div class="cw"><div class="ct">🧠 機会損失込み総コスト（円）</div><div id="oc2"></div></div>
+      <p class="note">※料金は概算です。実際の価格は各予約サイトでご確認ください。</p>
+    </div>
+  </div>
+</div>
+
+<script src="db.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
