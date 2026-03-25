@@ -9,14 +9,8 @@
 <body>
 <div class="container">
   <header>
-    <div class="header-row">
-      <div>
-        <h1>🗾 出張交通手段比較</h1>
-        <p>新幹線 / 飛行機 / 自家用車を費用・時間・機会損失で比較</p>
-      </div>
-      <button class="gear-btn" onclick="showKeyModal()" title="Google Maps APIキー設定">⚙️</button>
-    </div>
-    <div id="key-status" class="key-status unset">⚠️ APIキー未設定（概算モード）</div>
+    <h1>🗾 出張交通手段比較</h1>
+    <p>新幹線 / 飛行機 / 自家用車を費用・時間・機会損失で比較</p>
   </header>
 
   <div class="main">
@@ -205,27 +199,28 @@
   </div>
 </div>
 
-<!-- APIキー設定モーダル -->
+<!-- APIキー設定モーダル（ローカル実行時のフォールバック用） -->
 <div id="key-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeKeyModal()">
   <div class="modal-box">
-    <div class="modal-title">⚙️ Google Maps APIキー設定</div>
+    <div class="modal-title">⚙️ Google Maps APIキー（任意）</div>
     <p class="modal-desc">
-      APIキーを設定すると、<strong>鉄道・自動車の実際の経路・時刻・交通量</strong>をリアルタイムで取得できます。
+      Netlifyにデプロイして環境変数 <code>GOOGLE_MAPS_KEY</code> を設定すると、<strong>共有した全員がAPIキー不要</strong>でリアルタイムデータを利用できます。<br><br>
+      ローカルで試す場合は、こちらにキーを入力してください。
     </p>
     <div class="modal-steps">
       <div class="modal-step">1. <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> でプロジェクトを作成</div>
       <div class="modal-step">2. 「Directions API」を有効化</div>
-      <div class="modal-step">3. 認証情報でAPIキーを発行（無料枠あり）</div>
+      <div class="modal-step">3. 認証情報でAPIキーを発行（月$200無料枠あり）</div>
     </div>
     <div class="field" style="margin-top:1rem;">
-      <label>APIキー</label>
+      <label>APIキー（ローカル用）</label>
       <input type="text" id="key-input" placeholder="AIza..." style="width:100%;height:36px;padding:0 10px;font-size:13px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);">
     </div>
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeKeyModal()">キャンセル</button>
       <button class="modal-apply cbtn" style="flex:1;" onclick="applyKey()">保存して適用</button>
     </div>
-    <p class="note" style="margin-top:.5rem;">キーはブラウザのローカルストレージにのみ保存されます。</p>
+    <p class="note" style="margin-top:.5rem;">キーはこのブラウザのローカルストレージにのみ保存されます。</p>
   </div>
 </div>
 
