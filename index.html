@@ -9,9 +9,16 @@
 <body>
 <div class="container">
   <header>
-    <h1>🗾 出張交通手段比較</h1>
-    <p>新幹線 / 飛行機 / 自家用車を費用・時間・機会損失で比較</p>
+    <div class="header-row">
+      <div>
+        <h1>🗾 出張交通手段比較</h1>
+        <p>新幹線 / 飛行機 / 自家用車を費用・時間・機会損失で比較</p>
+      </div>
+      <button class="gear-btn" onclick="showKeyModal()" title="Google Maps APIキー設定">⚙️</button>
+    </div>
+    <div id="key-status" class="key-status unset">⚠️ APIキー未設定（概算モード）</div>
   </header>
+
   <div class="main">
     <div class="tabs">
       <div class="tab on" onclick="sw('basic')">基本設定</div>
@@ -174,6 +181,10 @@
               <input type="time" id="plan-time" value="09:00" class="time-input">
             </div>
             <button class="cbtn" onclick="searchSchedule()">🔍 便を検索</button>
+            <div id="search-loading" class="search-loading" style="display:none;">
+              <div class="spinner"></div>
+              <span>Google Maps からデータを取得中...</span>
+            </div>
           </div>
         </div>
 
@@ -191,6 +202,30 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- APIキー設定モーダル -->
+<div id="key-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeKeyModal()">
+  <div class="modal-box">
+    <div class="modal-title">⚙️ Google Maps APIキー設定</div>
+    <p class="modal-desc">
+      APIキーを設定すると、<strong>鉄道・自動車の実際の経路・時刻・交通量</strong>をリアルタイムで取得できます。
+    </p>
+    <div class="modal-steps">
+      <div class="modal-step">1. <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> でプロジェクトを作成</div>
+      <div class="modal-step">2. 「Directions API」を有効化</div>
+      <div class="modal-step">3. 認証情報でAPIキーを発行（無料枠あり）</div>
+    </div>
+    <div class="field" style="margin-top:1rem;">
+      <label>APIキー</label>
+      <input type="text" id="key-input" placeholder="AIza..." style="width:100%;height:36px;padding:0 10px;font-size:13px;border:0.5px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);">
+    </div>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeKeyModal()">キャンセル</button>
+      <button class="modal-apply cbtn" style="flex:1;" onclick="applyKey()">保存して適用</button>
+    </div>
+    <p class="note" style="margin-top:.5rem;">キーはブラウザのローカルストレージにのみ保存されます。</p>
   </div>
 </div>
 
