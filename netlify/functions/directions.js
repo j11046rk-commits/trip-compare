@@ -50,7 +50,10 @@ exports.handler = async (event) => {
   const url = `https://maps.googleapis.com/maps/api/directions/json?${params}`;
 
   try {
-    const res = await fetch(url);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 9000); // Netlify 10秒制限の手前で打ち切り
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
     const data = await res.json();
     return {
       statusCode: 200,

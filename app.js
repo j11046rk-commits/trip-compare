@@ -231,7 +231,7 @@ async function fetchViaProxy(mode, o, d, ts, isArr) {
 
 // ---- プロキシとクライアントキーを並行して試し、先に成功した方を返す ----
 async function fetchBest(apiMode, o, d, ts, isArr, dateStr, timeStr) {
-  const T = 7000;
+  const T = 12000; // コールドスタート考慮で12秒
   const attempts = [withTimeout(fetchViaProxy(apiMode, o, d, ts, isArr), T)];
   if (getClientKey()) {
     attempts.push(withTimeout(fetchViaClientKey(apiMode, o, d, dateStr, timeStr, isArr), T));
@@ -1037,4 +1037,6 @@ document.addEventListener('DOMContentLoaded', () => {
   buildPrefSel('dp');
   document.getElementById('op').value = '愛媛県';
   buildCitySel('oc', '愛媛県', 0);
+  // クライアントキーがあれば Maps JS を事前ロード（検索時の遅延を減らす）
+  if (getClientKey()) loadGoogleMaps().catch(() => {});
 });
