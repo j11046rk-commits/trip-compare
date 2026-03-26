@@ -426,13 +426,18 @@ function toYahooDatetime(dateStr, timeStr) {
 function parseYahooTransit(data, o, d) {
   const features = data.Feature || [];
   const scheds = [];
+  if (features.length > 0) {
+    console.log('[parseYahoo] Feature[0] 構造:', JSON.stringify(features[0]?.Property?.Summary));
+  }
 
   for (const feat of features.slice(0, 5)) {
     const sumMove = feat.Property?.Summary?.Move;
     const detail  = feat.Property?.Detail?.Move || [];
     if (!sumMove?.DepartureTime) continue;
 
-    const totalMin = parseInt(sumMove.Duration) || 0;
+    // DurationはAPIによって分/秒のどちらの場合もある。1440超なら秒とみなして変換
+    const rawDur   = parseInt(sumMove.Duration) || 0;
+    const totalMin = rawDur > 1440 ? Math.round(rawDur / 60) : rawDur;
     if (!totalMin) continue;
 
     // 料金: IC優先 → 現金 → 総額（単一オブジェクトの場合も配列化）
@@ -849,14 +854,21 @@ async function enrichWithRealData(results, o, d) {
     let gotYahoo = false;
     if (yahooRes.status === 'fulfilled') {
       const data     = yahooRes.value;
+      console.log('[enrich] Yahoo!レスポンス Feature数:', data?.Feature?.length ?? 0);
       const sumMove  = data.Feature?.[0]?.Property?.Summary?.Move;
+      console.log('[enrich] sumMove:', JSON.stringify(sumMove));
       if (sumMove) {
-        const realMin = parseInt(sumMove.Duration);
-        const prices  = sumMove.Price || [];
-        const priceEl = prices.find(p => p.Type === 'IC')
-                     || prices.find(p => p.Type === '現金')
-                     || prices.find(p => p.Type === '総額');
+        // DurationはAPIによって分/秒のどちらの場合もある。1440超なら秒とみなして変換
+        const rawDur  = parseInt(sumMove.Duration) || 0;
+        const realMin = rawDur > 1440 ? Math.round(rawDur / 60) : rawDur;
+        // Price: 単一オブジェクトの場合も配列化
+        const rawPrices = sumMove.Price;
+        const prices    = Array.isArray(rawPrices) ? rawPrices : (rawPrices ? [rawPrices] : []);
+        const priceEl   = prices.find(p => p.Type === 'IC')
+                       || prices.find(p => p.Type === '現金')
+                       || prices.find(p => p.Type === '総額');
         const fare = priceEl ? parseInt(priceEl.Amount) : null;
+        console.log('[enrich] realMin:', realMin, '/ fare:', fare, '/ prices:', JSON.stringify(prices));
 
         if (realMin) shinkR.tm = realMin * trips;
         if (fare) {
@@ -870,6 +882,8 @@ async function enrichWithRealData(results, o, d) {
         gotYahoo = true;
         updated  = true;
       }
+    } else {
+      console.warn('[enrich] Yahoo!失敗:', yahooRes.reason);
     }
     if (!gotYahoo) {
       const el = document.getElementById('badge-shink');

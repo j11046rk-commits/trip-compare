@@ -49,7 +49,11 @@ module.exports = async (req, res) => {
 
     // ResultInfo.Status でAPIレベルのエラーを検知
     const apiStatus = data?.ResultInfo?.Status;
-    console.log('[yahoo-transit] ResultInfo.Status:', apiStatus, '/ ルート数:', data?.Feature?.length ?? 0);
+    console.log('[yahoo-transit] ResultInfo:', JSON.stringify(data?.ResultInfo));
+    console.log('[yahoo-transit] Feature数:', data?.Feature?.length ?? 0);
+    if (data?.Feature?.[0]) {
+      console.log('[yahoo-transit] Feature[0].Property.Summary:', JSON.stringify(data.Feature[0]?.Property?.Summary));
+    }
 
     if (apiStatus && apiStatus !== 200) {
       console.error('[yahoo-transit] APIエラー Status:', apiStatus, data?.ResultInfo?.Description);
