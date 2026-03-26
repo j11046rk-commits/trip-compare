@@ -406,6 +406,93 @@ function parseDrivingRoute(data, o, d, dateStr, timeStr, isArr) {
   }];
 }
 
+// ==== Yahoo!路線情報API ====
+
+// ---- 時刻ユーティリティ（Yahoo!形式 "YYYYMMDDHHmm[ss]"）----
+function yhTimeToHHMM(t) {
+  if (!t || t.length < 12) return '--:--';
+  return `${t.slice(8, 10)}:${t.slice(10, 12)}`;
+}
+function yhTimeToMin(t) {
+  if (!t || t.length < 12) return 0;
+  return parseInt(t.slice(8, 10)) * 60 + parseInt(t.slice(10, 12));
+}
+function toYahooDatetime(dateStr, timeStr) {
+  // "2024-01-19" + "09:00" → "202401190900"
+  return dateStr.replace(/-/g, '') + timeStr.replace(':', '');
+}
+
+// ---- Yahoo!路線情報APIレスポンス解析 ----
+function parseYahooTransit(data, o, d) {
+  const features = data.Feature || [];
+  const scheds = [];
+
+  for (const feat of features.slice(0, 5)) {
+    const sumMove = feat.Property?.Summary?.Move;
+    const detail  = feat.Property?.Detail?.Move || [];
+    if (!sumMove?.DepartureTime) continue;
+
+    const totalMin = parseInt(sumMove.Duration) || 0;
+    if (!totalMin) continue;
+
+    // 料金: IC優先 → 現金 → 総額
+    const prices  = sumMove.Price || [];
+    const priceEl = prices.find(p => p.Type === 'IC')
+                 || prices.find(p => p.Type === '現金')
+                 || prices.find(p => p.Type === '総額');
+    const fare = priceEl ? parseInt(priceEl.Amount) : null;
+
+    // ステップ構築（徒歩=Type"0"はスキップ、乗車=Type"1"のみ）
+    const steps     = [];
+    const lineNames = [];
+    steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${o.l}出発`]);
+
+    for (const mv of detail) {
+      if (mv.Type !== '1') continue; // 徒歩スキップ
+      const lineName = mv.TransportName || '鉄道';
+      lineNames.push(lineName);
+      steps.push([yhTimeToHHMM(mv.DepartureTime), `${mv.DepartureStation}発（${lineName}）`]);
+      steps.push([yhTimeToHHMM(mv.ArrivalTime),   `${mv.ArrivalStation}着`]);
+    }
+    if (!lineNames.length) continue;
+
+    const arrHHMM = yhTimeToHHMM(sumMove.ArrivalTime);
+    if (steps[steps.length - 1]?.[1] !== `${d.l}到着`) {
+      steps.push([arrHHMM, `${d.l}到着`]);
+    }
+
+    // 最初の乗車ステップの出発駅・時刻（15分前を「向かう時刻」とする）
+    const firstLeg  = detail.find(mv => mv.Type === '1');
+    const goToName  = firstLeg?.DepartureStation || o.l;
+    const goToMin   = firstLeg ? yhTimeToMin(firstLeg.DepartureTime) - 15 : yhTimeToMin(sumMove.DepartureTime);
+    const goToJP    = toJP(((goToMin % 1440) + 1440) % 1440);
+
+    scheds.push({
+      type: 'shink',
+      depTime:  yhTimeToHHMM(sumMove.DepartureTime),
+      arrTime:  arrHHMM,
+      rideOnly: lineNames.join(' → '),
+      totalMin,
+      fare,
+      steps,
+      goTo: { time: goToJP, name: goToName },
+      isReal: true,
+    });
+  }
+  return scheds;
+}
+
+// ---- Yahoo! APIフェッチ（サーバー経由）----
+async function fetchYahooTransit(o, d, datetime, isArr) {
+  const url = `/api/yahoo-transit?fromLat=${o.lat}&fromLng=${o.lng}&toLat=${d.lat}&toLng=${d.lng}&datetime=${datetime}&isarr=${isArr}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('YAHOO_HTTP_' + res.status);
+  const data = await res.json();
+  if (data.status === 'NO_KEY')  throw new Error('NO_KEY');
+  if (data.status === 'ERROR' || data.status === 'API_ERROR') throw new Error(data.status);
+  return data;
+}
+
 // ---- 外部リンク ----
 function yahooTransitLink(o, d, dateStr, timeStr, isArr) {
   const date = dateStr.replace(/-/g, '');
@@ -741,36 +828,47 @@ async function enrichWithRealData(results, o, d) {
   const nights   = +document.getElementById('nights').value  || 0;
   const park     = +document.getElementById('park').value   || 1500;
 
-  const [transitRes, drivingRes] = await Promise.allSettled([
-    hasShink ? withTimeout(fetchViaProxy('transit', o, d, ts, false), 7000) : Promise.reject('skip'),
-    hasCar   ? withTimeout(fetchViaProxy('driving', o, d, ts, false), 7000) : Promise.reject('skip'),
+  // 現在日時を Yahoo! 形式に変換（YYYYMMDDHHMM）
+  const nowDt = new Date(ts * 1000);
+  const pad2  = n => String(n).padStart(2, '0');
+  const yahooNowDt = `${nowDt.getFullYear()}${pad2(nowDt.getMonth()+1)}${pad2(nowDt.getDate())}${pad2(nowDt.getHours())}${pad2(nowDt.getMinutes())}`;
+
+  const [yahooRes, drivingRes] = await Promise.allSettled([
+    hasShink ? withTimeout(fetchYahooTransit(o, d, yahooNowDt, false), 10000) : Promise.reject('skip'),
+    hasCar   ? withTimeout(fetchViaProxy('driving', o, d, ts, false), 7000)   : Promise.reject('skip'),
   ]);
 
   let updated = false;
 
-  // 新幹線: transit APIデータを反映
+  // 新幹線: Yahoo!路線情報APIで実運賃・実時間を反映
   const shinkR = results.find(r => r.id === 'shink');
   if (shinkR) {
-    if (transitRes.status === 'fulfilled') {
-      const data = transitRes.value;
-      const leg  = data.routes?.[0]?.legs?.[0];
-      if (leg) {
-        const realMin  = Math.round(leg.duration.value / 60);
-        const realFare = data.routes[0].fare?.value || null; // API提供時のみ実料金
+    let gotYahoo = false;
+    if (yahooRes.status === 'fulfilled') {
+      const data     = yahooRes.value;
+      const sumMove  = data.Feature?.[0]?.Property?.Summary?.Move;
+      if (sumMove) {
+        const realMin = parseInt(sumMove.Duration);
+        const prices  = sumMove.Price || [];
+        const priceEl = prices.find(p => p.Type === 'IC')
+                     || prices.find(p => p.Type === '現金')
+                     || prices.find(p => p.Type === '総額');
+        const fare = priceEl ? parseInt(priceEl.Amount) : null;
 
-        shinkR.tm  = realMin * trips;
-        shinkR.op  = opp(shinkR.tm, 0.40, hourly, pax);
-        if (realFare) {
-          shinkR.tc = realFare * pax * trips;
-          shinkR.bd['新幹線料金'] = realFare * pax * trips;
+        if (realMin) shinkR.tm = realMin * trips;
+        if (fare) {
+          shinkR.tc = fare * pax * trips;
+          shinkR.bd['新幹線料金'] = fare * pax * trips;
         }
-        shinkR.two      = shinkR.tc + shinkR.op;
-        shinkR._realFare = !!realFare;
+        shinkR.op        = opp(shinkR.tm, 0.40, hourly, pax);
+        shinkR.two       = shinkR.tc + shinkR.op;
+        shinkR._realFare = !!fare;
         shinkR._enriched = true;
-        updated = true;
+        gotYahoo = true;
+        updated  = true;
       }
     }
-    if (!shinkR._enriched) {
+    if (!gotYahoo) {
       const el = document.getElementById('badge-shink');
       if (el) { el.textContent = '概算値'; el.className = 'real-badge rdb-est'; }
     }
@@ -906,13 +1004,29 @@ async function searchSchedule() {
   try {
     if (P.mode === 'shink') {
       let scheds = null;
-      const data = await fetchBest('transit', o, d, ts, isArr, dateStr, timeStr);
-      if (data) {
-        scheds = data._fromSDK
-          ? parseTransitFromSDK(data, o, d)
-          : parseTransitFromREST(data, o, d);
+      const datetime = toYahooDatetime(dateStr, timeStr);
+
+      // ① Yahoo!路線情報API（実運賃・実時刻）
+      try {
+        const data = await withTimeout(fetchYahooTransit(o, d, datetime, isArr), 12000);
+        if (data?.Feature?.length) scheds = parseYahooTransit(data, o, d);
+      } catch (e) {
+        if (e.message !== 'NO_KEY') console.warn('Yahoo transit:', e.message);
       }
+
+      // ② Google Maps transit（フォールバック）
+      if (!scheds?.length) {
+        const data = await fetchBest('transit', o, d, ts, isArr, dateStr, timeStr);
+        if (data) {
+          scheds = data._fromSDK
+            ? parseTransitFromSDK(data, o, d)
+            : parseTransitFromREST(data, o, d);
+        }
+      }
+
+      // ③ 概算
       if (!scheds?.length) scheds = genShinkSchedules(o, d, isArr, tMin);
+
       _scheds = scheds;
       renderSchedules(scheds, {
         extLink: yahooTransitLink(o, d, dateStr, timeStr, isArr),
