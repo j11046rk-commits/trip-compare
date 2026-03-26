@@ -28,10 +28,11 @@ function toUnix(dateStr, timeStr) { return Math.floor(makeDateObj(dateStr, timeS
 
 // ---- 料金テーブル ----
 function shinkFare(km) {
-  const t = [50,100,200,300,400,500,600,700,800,900,1000];
-  const v = [2500,4500,7000,9500,11500,14500,16500,18000,20000,21000,22500];
+  // JR実運賃+特急料金(指定席)の実績値に基づくブラケット
+  const t = [50,  100,  200,  300,  400,  500,  600,  700,  800,  900, 1000];
+  const v = [3500, 5500, 8000,11000,13500,15000,16500,17500,18500,20500,22000];
   for (let i = 0; i < t.length; i++) if (km < t[i]) return v[i];
-  return 24000;
+  return 22500;
 }
 function airFare(km, type) {
   const t = [200,400,600,800,1000,1300];
@@ -171,7 +172,7 @@ function updateInfo() {
   document.getElementById('oi').textContent = o.l;
   document.getElementById('di').textContent = `${d.l}　約${rd}km　│　${modes.join(' ')}`;
   document.getElementById('irow').style.display = 'grid';
-  document.getElementById('toll').value = Math.round(rd * 18 / 100) * 100;
+  document.getElementById('toll').value = Math.round(rd * 24 / 100) * 100;
 }
 
 function swapOD() {
@@ -209,6 +210,14 @@ function togPlan(type, btn) {
 
 // ==== リアルデータ取得 ====
 
+// ---- タイムアウトラッパー ----
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('TIMEOUT')), ms);
+    promise.then(v => { clearTimeout(t); resolve(v); }, e => { clearTimeout(t); reject(e); });
+  });
+}
+
 // ---- ① Netlifyプロキシ経由（サーバーキー）----
 async function fetchViaProxy(mode, o, d, ts, isArr) {
   const url = `/api/directions?mode=${mode}&olat=${o.lat}&olng=${o.lng}&dlat=${d.lat}&dlng=${d.lng}&ts=${ts}&isArr=${isArr}`;
@@ -218,6 +227,20 @@ async function fetchViaProxy(mode, o, d, ts, isArr) {
   if (data.status === 'NO_KEY') throw new Error('NO_KEY');
   if (data.status !== 'OK') throw new Error(data.status || 'API_ERROR');
   return data;
+}
+
+// ---- プロキシとクライアントキーを並行して試し、先に成功した方を返す ----
+async function fetchBest(apiMode, o, d, ts, isArr, dateStr, timeStr) {
+  const T = 7000;
+  const attempts = [withTimeout(fetchViaProxy(apiMode, o, d, ts, isArr), T)];
+  if (getClientKey()) {
+    attempts.push(withTimeout(fetchViaClientKey(apiMode, o, d, dateStr, timeStr, isArr), T));
+  }
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    return null;
+  }
 }
 
 // ---- ② クライアントAPIキー経由（フォールバック）----
@@ -417,17 +440,28 @@ function genShinkSchedules(o, d, isArr, tMin) {
     if (cityDep < 5 * 60) continue;
     const shinkArr = shinkDep + rideMin;
     const cityArr = shinkArr + accD;
+    // 在来線乗換がある場合は市内駅を起点とする
+    const oLocalStn = (o.sam || 0) > 0 ? `${o.l}駅` : oStn;
+    const dLocalStn = (d.sam || 0) > 0 ? `${d.l}駅` : dStn;
+    const rideDesc = [
+      (o.sam || 0) > 0 ? `在来線 ${oLocalStn}→${oStn}` : null,
+      `新幹線 ${oStn}→${dStn}（約${rideMin}分）`,
+      (d.sam || 0) > 0 ? `在来線 ${dStn}→${dLocalStn}` : null,
+    ].filter(Boolean).join(' → ');
     const steps = [];
-    steps.push([toHHMM(cityDep), `${o.l}出発`]);
-    if ((o.sam || 0) > 0) steps.push([toHHMM(cityDep + (o.sam || 0)), `${oStn}到着`]);
-    steps.push([toHHMM(shinkDep), `${oStn}発`]);
+    steps.push([toHHMM(cityDep), `${oLocalStn}出発${(o.sam || 0) > 0 ? '（在来線）' : ''}`]);
+    if ((o.sam || 0) > 0) steps.push([toHHMM(cityDep + (o.sam || 0)), `${oStn}到着・乗換`]);
+    steps.push([toHHMM(shinkDep), `${oStn}発（新幹線）`]);
     steps.push([toHHMM(shinkArr), `${dStn}着`]);
-    if ((d.sam || 0) > 0) steps.push([toHHMM(cityArr), `${d.l}到着`]);
+    if ((d.sam || 0) > 0) {
+      steps.push([toHHMM(shinkArr + 10), `${dStn}発（在来線）`]);
+      steps.push([toHHMM(cityArr), `${dLocalStn}到着`]);
+    }
     scheds.push({
       type: 'shink', depTime: toHHMM(cityDep), arrTime: toHHMM(cityArr),
-      rideOnly: `${oStn} → ${dStn}（約${rideMin}分）`,
+      rideOnly: rideDesc,
       totalMin, steps,
-      goTo: { time: toJP(cityDep), name: oStn },
+      goTo: { time: toJP(cityDep), name: oLocalStn },
       isReal: false,
     });
   }
@@ -469,8 +503,8 @@ function genAirSchedules(o, d, isArr, tMin, ld) {
 }
 
 function genCarSchedule(o, d, isArr, tMin, rd) {
-  const driveMin = Math.round((rd / 80) * 60);
-  const totalMin = 15 + driveMin;
+  const driveMin = Math.round((rd / 90) * 60) + (rd > 500 ? 60 : rd > 300 ? 30 : 0);
+  const totalMin = driveMin;
   const cityDep = isArr ? tMin - totalMin : tMin;
   const cityArr = cityDep + totalMin;
   return [{
@@ -555,8 +589,12 @@ function calc() {
   }
 
   if (canFly(o, d, rd)) {
-    const fmin = Math.max(40, Math.round(ld / 8));
-    const tm2 = ((o.hasAir ? 60 : 90) + 60 + fmin + (d.hasAir ? 30 : 50)) * trips;
+    // フライト時間: 短距離でも最低60分、距離比例項に固定オフセットを加算（国内実績値に近似）
+    const fmin = Math.max(60, Math.round(ld * 0.07) + 45);
+    // 空港アクセス: APテーブルの都道府県別実績値を使用（出発側はチェックイン60分バッファ込み）
+    const accO = apAccess(o.pref) + 60;
+    const accD = apAccess(d.pref);
+    const tm2 = (accO + fmin + accD) * trips;
     const base = airFare(ld, S.air);
     const tc2 = (base * pax + airAcc * pax) * trips;
     const op2 = opp(tm2, 0.70, hourly, pax);
@@ -569,11 +607,12 @@ function calc() {
   }
 
   if (canCar(o, d)) {
-    const dMin = Math.round((rd / 80) * 60);
+    // 高速主体90km/h、長距離は休憩考慮(300km超で+30分、500km超で+60分)
+    const dMin = Math.round((rd / 90) * 60) + (rd > 500 ? 60 : rd > 300 ? 30 : 0);
     const fuel = (rd / mpg) * gasp;
     const pc   = park * Math.max(nights, isR ? 0 : 1);
     const tc3  = (fuel + toll) * trips + pc;
-    const tm3  = dMin * trips + 30;
+    const tm3  = dMin * trips;
     const op3  = opp(dMin * trips, 1.0, hourly, 1);
     results.push({
       id: 'car', name: '自家用車', icon: '🚗',
@@ -606,47 +645,10 @@ function calc() {
       <div class="sdc"><div class="sdl">機会損失込</div><div class="sdv">¥${fmt(winner.two)}</div></div>
     </div>`;
 
-  const clr = { shink: '#378ADD', fly: '#1D9E75', car: '#BA7517' };
-  document.getElementById('cards').innerHTML = results.map(r => {
-    const isBest = r.id === winner.id;
-    const cC = r.tc === minC ? 'g' : r.tc === mC ? 'b' : '';
-    const tC = r.tm === minT ? 'g' : r.tm === mT ? 'b' : '';
-    const f  = '●'.repeat(r.fat) + '○'.repeat(5 - r.fat);
-    const fl = '●'.repeat(r.flex) + '○'.repeat(5 - r.flex);
-    return `<div class="card${isBest ? ' best' : ''}">
-      ${isBest ? '<div class="bdg">おすすめ</div>' : ''}
-      <div class="cico">${r.icon}</div><div class="cname">${r.name}</div>
-      <div class="mr"><span class="ml">実費</span><span class="mv ${cC}">¥${fmt(r.tc)}</span></div>
-      <div class="mr"><span class="ml">所要時間</span><span class="mv ${tC}">${fmtM(r.tm)}</span></div>
-      <div class="mr"><span class="ml">機会損失</span><span class="mv">¥${fmt(r.op)}</span></div>
-      <div class="mr"><span class="ml">機会損失込</span><span class="mv">¥${fmt(r.two)}</span></div>
-      <div class="mr"><span class="ml">疲労度</span><span class="mv" style="font-size:9px;letter-spacing:-1px;">${f}</span></div>
-      <div class="mr"><span class="ml">柔軟性</span><span class="mv" style="font-size:9px;letter-spacing:-1px;">${fl}</span></div>
-      <div class="sb">
-        <div class="slb2"><span>総合スコア</span><span>${r.pct}%</span></div>
-        <div class="st"><div class="sf" style="width:${r.pct}%;background:${clr[r.id]};"></div></div>
-      </div>
-    </div>`;
-  }).join('');
-
-  const mkC = (id, vFn, lFn) => {
-    const mx = Math.max(...results.map(vFn));
-    document.getElementById(id).innerHTML = results.map(r => {
-      const w  = Math.max(8, Math.round((vFn(r) / mx) * 100));
-      const bd = Object.entries(r.bd).filter(([k]) => k !== '機会損失').map(([k, v]) => `${k}:¥${fmt(v)}`).join(' / ');
-      return `<div class="brow">
-        <div class="bm">${r.icon}${r.name}</div>
-        <div class="bt"><div class="bf" style="width:${w}%;background:${clr[r.id]};"><span>${lFn(r)}</span></div></div>
-      </div><div class="bsub">${bd}</div>`;
-    }).join('');
-  };
-  mkC('cc',  r => r.tc,  r => `¥${fmt(r.tc)}`);
-  mkC('tc2', r => r.tm,  r => fmtM(r.tm));
-  mkC('oc2', r => r.two, r => `¥${fmt(r.two)}`);
+  G = { o, d, rd, ld };
+  renderCards(results, winner);
 
   document.getElementById('results').className = 'res show';
-
-  G = { o, d, rd, ld };
   document.getElementById('plan-modes').innerHTML = results.map(r => `
     <button class="plan-mode-btn${r.id === winner.id ? ' rec' : ''}" data-mode="${r.id}" onclick="selectTransport('${r.id}')">
       ${r.id === winner.id ? '<span class="pmb-badge">おすすめ</span>' : ''}
@@ -658,6 +660,223 @@ function calc() {
   P.mode = null;
   document.querySelectorAll('.plan-mode-btn').forEach(b => b.classList.remove('on'));
   document.getElementById('plan-date').value = new Date().toISOString().split('T')[0];
+
+  // バックグラウンドでリアルデータ取得・反映
+  enrichWithRealData(results, o, d).catch(() => {
+    document.querySelectorAll('.real-badge.rdb-loading').forEach(el => {
+      el.textContent = '概算値';
+      el.className = 'real-badge rdb-est';
+    });
+  });
+}
+
+// ---- カード描画 ----
+const CLR = { shink: '#378ADD', fly: '#1D9E75', car: '#BA7517' };
+
+function renderCards(results, winner) {
+  const mC = Math.max(...results.map(r => r.tc));
+  const mT = Math.max(...results.map(r => r.tm));
+  const minC = Math.min(...results.map(r => r.tc));
+  const minT = Math.min(...results.map(r => r.tm));
+
+  document.getElementById('cards').innerHTML = results.map(r => {
+    const isBest = r.id === winner.id;
+    const cC = r.tc === minC ? 'g' : r.tc === mC ? 'b' : '';
+    const tC = r.tm === minT ? 'g' : r.tm === mT ? 'b' : '';
+    const f  = '●'.repeat(r.fat) + '○'.repeat(5 - r.fat);
+    const fl = '●'.repeat(r.flex) + '○'.repeat(5 - r.flex);
+    const badge = r._enriched
+      ? (r._realFare
+          ? `<div class="real-badge rdb-ok">✅ 実データ</div>`
+          : `<div class="real-badge rdb-partial">⏱ 時間:実データ / 料金:概算</div>`)
+      : `<div class="real-badge rdb-loading" id="badge-${r.id}">⟳ リアルデータ取得中...</div>`;
+    const flyLink = r.id === 'fly'
+      ? `<div class="real-badge rdb-fly"><a href="${googleFlightsLink(G.o, G.d, document.getElementById('plan-date')?.value || new Date().toISOString().split('T')[0])}" target="_blank" rel="noopener">✈️ Google Flightsで実際の料金を確認</a></div>`
+      : '';
+    return `<div class="card${isBest ? ' best' : ''}" id="card-${r.id}">
+      ${isBest ? '<div class="bdg">おすすめ</div>' : ''}
+      <div class="cico">${r.icon}</div><div class="cname">${r.name}</div>
+      <div class="mr"><span class="ml">実費</span><span class="mv ${cC}" id="cost-${r.id}">¥${fmt(r.tc)}</span></div>
+      <div class="mr"><span class="ml">所要時間</span><span class="mv ${tC}" id="time-${r.id}">${fmtM(r.tm)}</span></div>
+      <div class="mr"><span class="ml">機会損失</span><span class="mv" id="opp-${r.id}">¥${fmt(r.op)}</span></div>
+      <div class="mr"><span class="ml">機会損失込</span><span class="mv" id="two-${r.id}">¥${fmt(r.two)}</span></div>
+      <div class="mr"><span class="ml">疲労度</span><span class="mv" style="font-size:9px;letter-spacing:-1px;">${f}</span></div>
+      <div class="mr"><span class="ml">柔軟性</span><span class="mv" style="font-size:9px;letter-spacing:-1px;">${fl}</span></div>
+      <div class="sb">
+        <div class="slb2"><span>総合スコア</span><span id="pct-${r.id}">${r.pct}%</span></div>
+        <div class="st"><div class="sf" id="bar-${r.id}" style="width:${r.pct}%;background:${CLR[r.id]};"></div></div>
+      </div>
+      ${r.id === 'fly' ? flyLink : badge}
+    </div>`;
+  }).join('');
+
+  const mkC = (id, vFn, lFn) => {
+    const mx = Math.max(...results.map(vFn));
+    document.getElementById(id).innerHTML = results.map(r => {
+      const w  = Math.max(8, Math.round((vFn(r) / mx) * 100));
+      const bd = Object.entries(r.bd).filter(([k]) => k !== '機会損失').map(([k, v]) => `${k}:¥${fmt(v)}`).join(' / ');
+      return `<div class="brow">
+        <div class="bm">${r.icon}${r.name}</div>
+        <div class="bt"><div class="bf" style="width:${w}%;background:${CLR[r.id]};"><span>${lFn(r)}</span></div></div>
+      </div><div class="bsub">${bd}</div>`;
+    }).join('');
+  };
+  mkC('cc',  r => r.tc,  r => `¥${fmt(r.tc)}`);
+  mkC('tc2', r => r.tm,  r => fmtM(r.tm));
+  mkC('oc2', r => r.two, r => `¥${fmt(r.two)}`);
+}
+
+// ---- リアルタイムデータ取得・反映 ----
+async function enrichWithRealData(results, o, d) {
+  const ts = Math.floor(Date.now() / 1000) + 300; // 5分後出発想定
+  const hasShink = results.some(r => r.id === 'shink');
+  const hasCar   = results.some(r => r.id === 'car');
+  const isR      = S.trip === 'roundtrip';
+  const trips    = isR ? 2 : 1;
+  const pax      = +document.getElementById('pax').value    || 1;
+  const hourly   = +document.getElementById('hourly').value  || 0;
+  const mpg      = +document.getElementById('mpg').value    || 15;
+  const gasp     = +document.getElementById('gasp').value   || 170;
+  const toll     = +document.getElementById('toll').value   || 0;
+  const nights   = +document.getElementById('nights').value  || 0;
+  const park     = +document.getElementById('park').value   || 1500;
+
+  const [transitRes, drivingRes] = await Promise.allSettled([
+    hasShink ? withTimeout(fetchViaProxy('transit', o, d, ts, false), 7000) : Promise.reject('skip'),
+    hasCar   ? withTimeout(fetchViaProxy('driving', o, d, ts, false), 7000) : Promise.reject('skip'),
+  ]);
+
+  let updated = false;
+
+  // 新幹線: transit APIデータを反映
+  const shinkR = results.find(r => r.id === 'shink');
+  if (shinkR) {
+    if (transitRes.status === 'fulfilled') {
+      const data = transitRes.value;
+      const leg  = data.routes?.[0]?.legs?.[0];
+      if (leg) {
+        const realMin  = Math.round(leg.duration.value / 60);
+        const realFare = data.routes[0].fare?.value || null; // API提供時のみ実料金
+
+        shinkR.tm  = realMin * trips;
+        shinkR.op  = opp(shinkR.tm, 0.40, hourly, pax);
+        if (realFare) {
+          shinkR.tc = realFare * pax * trips;
+          shinkR.bd['新幹線料金'] = realFare * pax * trips;
+        }
+        shinkR.two      = shinkR.tc + shinkR.op;
+        shinkR._realFare = !!realFare;
+        shinkR._enriched = true;
+        updated = true;
+      }
+    }
+    if (!shinkR._enriched) {
+      const el = document.getElementById('badge-shink');
+      if (el) { el.textContent = '概算値'; el.className = 'real-badge rdb-est'; }
+    }
+  }
+
+  // 車: driving APIデータを反映（実距離・交通量込み時間）
+  const carR = results.find(r => r.id === 'car');
+  if (carR) {
+    if (drivingRes.status === 'fulfilled') {
+      const data = drivingRes.value;
+      const leg  = data.routes?.[0]?.legs?.[0];
+      if (leg) {
+        const realMin = Math.round((leg.duration_in_traffic?.value || leg.duration.value) / 60);
+        const realKm  = Math.round(leg.distance.value / 1000);
+        const fuel    = (realKm / mpg) * gasp;
+        const pc      = park * Math.max(nights, isR ? 0 : 1);
+
+        carR.tm   = realMin * trips;
+        carR.tc   = (fuel + toll) * trips + pc;
+        carR.op   = opp(carR.tm, 1.0, hourly, 1);
+        carR.two  = carR.tc + carR.op;
+        carR.route = `${o.l}→実ルート(${realKm}km / 交通量込み)→${d.l}`;
+        carR.bd['ガソリン'] = Math.round(fuel * trips);
+        carR._realFare  = true;
+        carR._enriched  = true;
+        carR._realKm    = realKm;
+        updated = true;
+      }
+    }
+    if (!carR._enriched) {
+      const el = document.getElementById('badge-car');
+      if (el) { el.textContent = '概算値'; el.className = 'real-badge rdb-est'; }
+    }
+  }
+
+  if (!updated) return;
+
+  // スコア再計算
+  const mC = Math.max(...results.map(r => r.tc));
+  const mT = Math.max(...results.map(r => r.tm));
+  const mO = Math.max(...results.map(r => r.op));
+  results.forEach(r => r.score = scoreF(r, mC, mT, mO));
+  const maxSc = Math.max(...results.map(r => r.score));
+  results.forEach(r => r.pct = Math.round((r.score / maxSc) * 100));
+  const winner = results.reduce((a, b) => a.score > b.score ? a : b);
+
+  // カード数値をDOM更新（再レンダリングせず差し替え）
+  const minC = Math.min(...results.map(r => r.tc));
+  const minT = Math.min(...results.map(r => r.tm));
+  results.forEach(r => {
+    const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setTxt(`cost-${r.id}`, `¥${fmt(r.tc)}`);
+    setTxt(`time-${r.id}`, fmtM(r.tm));
+    setTxt(`opp-${r.id}`,  `¥${fmt(r.op)}`);
+    setTxt(`two-${r.id}`,  `¥${fmt(r.two)}`);
+    setTxt(`pct-${r.id}`,  `${r.pct}%`);
+    const bar = document.getElementById(`bar-${r.id}`);
+    if (bar) bar.style.width = r.pct + '%';
+
+    // バッジ更新
+    const badge = document.getElementById(`badge-${r.id}`);
+    if (badge && r._enriched) {
+      badge.textContent = r._realFare
+        ? (r.id === 'car' ? `✅ 実ルート ${r._realKm}km / 交通量込み` : '✅ 実データ（時間・料金）')
+        : '⏱ 時間:実データ / 料金:概算';
+      badge.className = 'real-badge ' + (r._realFare ? 'rdb-ok' : 'rdb-partial');
+    }
+
+    // おすすめバッジ
+    const card = document.getElementById(`card-${r.id}`);
+    if (card) card.classList.toggle('best', r.id === winner.id);
+
+    // 費用色クラス更新
+    const costEl = document.getElementById(`cost-${r.id}`);
+    if (costEl) costEl.className = `mv ${r.tc === minC ? 'g' : r.tc === mC ? 'b' : ''}`;
+    const timeEl = document.getElementById(`time-${r.id}`);
+    if (timeEl) timeEl.className = `mv ${r.tm === minT ? 'g' : r.tm === mT ? 'b' : ''}`;
+  });
+
+  // バーチャート更新
+  const mkC = (id, vFn, lFn) => {
+    const mx = Math.max(...results.map(vFn));
+    document.getElementById(id).innerHTML = results.map(r => {
+      const w  = Math.max(8, Math.round((vFn(r) / mx) * 100));
+      const bd = Object.entries(r.bd).filter(([k]) => k !== '機会損失').map(([k, v]) => `${k}:¥${fmt(v)}`).join(' / ');
+      return `<div class="brow">
+        <div class="bm">${r.icon}${r.name}</div>
+        <div class="bt"><div class="bf" style="width:${w}%;background:${CLR[r.id]};"><span>${lFn(r)}</span></div></div>
+      </div><div class="bsub">${bd}</div>`;
+    }).join('');
+  };
+  mkC('cc',  r => r.tc,  r => `¥${fmt(r.tc)}`);
+  mkC('tc2', r => r.tm,  r => fmtM(r.tm));
+  mkC('oc2', r => r.two, r => `¥${fmt(r.two)}`);
+
+  // wbox（おすすめ）更新
+  const pL = { balanced:'バランス', cost:'費用', time:'時間', comfort:'快適性', opp:'機会損失' }[S.priority];
+  document.getElementById('wbox').innerHTML = `
+    <div class="wtitle">${pL}重視スコアで選ぶなら</div>
+    <div class="wtext">${winner.icon} ${winner.name} がおすすめ（${isR ? '往復' : '片道'} / ${pax}名）</div>
+    <div class="wsub">${winner.route}</div>
+    <div class="sd">
+      <div class="sdc"><div class="sdl">実費</div><div class="sdv">¥${fmt(winner.tc)}</div></div>
+      <div class="sdc"><div class="sdl">所要時間</div><div class="sdv">${fmtM(winner.tm)}</div></div>
+      <div class="sdc"><div class="sdl">機会損失込</div><div class="sdv">¥${fmt(winner.two)}</div></div>
+    </div>`;
 }
 
 // ---- 交通手段選択 ----
@@ -687,30 +906,13 @@ async function searchSchedule() {
   try {
     if (P.mode === 'shink') {
       let scheds = null;
-
-      // ① プロキシ（サーバーキー）を試す
-      try {
-        const data = await fetchViaProxy('transit', o, d, ts, isArr);
-        scheds = parseTransitFromREST(data, o, d);
-      } catch (e) {
-        if (e.message !== 'NO_KEY') console.warn('Proxy transit failed:', e.message);
+      const data = await fetchBest('transit', o, d, ts, isArr, dateStr, timeStr);
+      if (data) {
+        scheds = data._fromSDK
+          ? parseTransitFromSDK(data, o, d)
+          : parseTransitFromREST(data, o, d);
       }
-
-      // ② クライアントキー JS SDK を試す
-      if (!scheds?.length) {
-        try {
-          const data = await fetchViaClientKey('transit', o, d, dateStr, timeStr, isArr);
-          scheds = parseTransitFromSDK(data, o, d);
-        } catch (e) {
-          if (e.message !== 'NO_KEY') console.warn('Client SDK transit failed:', e.message);
-        }
-      }
-
-      // ③ 概算にフォールバック
-      if (!scheds?.length) {
-        scheds = genShinkSchedules(o, d, isArr, tMin);
-      }
-
+      if (!scheds?.length) scheds = genShinkSchedules(o, d, isArr, tMin);
       _scheds = scheds;
       renderSchedules(scheds, {
         extLink: yahooTransitLink(o, d, dateStr, timeStr, isArr),
@@ -727,37 +929,16 @@ async function searchSchedule() {
       });
 
     } else if (P.mode === 'car') {
-      let scheds = null;
-
-      // 到着時刻指定の場合、概算出発時刻を計算してから取得
       let depTimeStr = timeStr;
       if (isArr) {
-        const estMin = Math.round((rd / 80) * 60) + 15;
+        const estMin = Math.round((rd / 90) * 60) + (rd > 300 ? 30 : 0);
         depTimeStr = toHHMM(tMin - estMin);
       }
       const depTs = toUnix(dateStr, depTimeStr);
-
-      // ① プロキシ
-      try {
-        const data = await fetchViaProxy('driving', o, d, depTs, false);
-        scheds = parseDrivingRoute(data, o, d, dateStr, timeStr, isArr);
-      } catch (e) {
-        if (e.message !== 'NO_KEY') console.warn('Proxy driving failed:', e.message);
-      }
-
-      // ② クライアントキー JS SDK
-      if (!scheds?.length) {
-        try {
-          const data = await fetchViaClientKey('driving', o, d, dateStr, depTimeStr, false);
-          scheds = parseDrivingRoute(data, o, d, dateStr, timeStr, isArr);
-        } catch (e) {
-          if (e.message !== 'NO_KEY') console.warn('Client SDK driving failed:', e.message);
-        }
-      }
-
-      // ③ 概算
+      let scheds = null;
+      const data = await fetchBest('driving', o, d, depTs, false, dateStr, depTimeStr);
+      if (data) scheds = parseDrivingRoute(data, o, d, dateStr, timeStr, isArr);
       if (!scheds?.length) scheds = genCarSchedule(o, d, isArr, tMin, rd);
-
       _scheds = scheds;
       renderSchedules(scheds, {
         extLink: googleMapsCarLink(o, d),

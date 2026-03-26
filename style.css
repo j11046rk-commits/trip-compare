@@ -289,6 +289,27 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 
 .note { font-size: 10px; color: var(--text3); margin-top: .5rem; text-align: center; }
 
+/* リアルデータバッジ */
+.real-badge {
+  margin-top: 8px;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+.real-badge a { color: inherit; text-decoration: underline; }
+.rdb-loading { background: var(--bg2); color: var(--text3); animation: pulse 1.4s ease-in-out infinite; }
+.rdb-ok      { background: #d4f0e6; color: #0d6644; }
+.rdb-partial { background: #e6f1fb; color: var(--info-text); }
+.rdb-est     { background: var(--bg2); color: var(--text3); }
+.rdb-fly     { background: #faeeda; color: var(--warn-text); }
+@media (prefers-color-scheme: dark) {
+  .rdb-ok      { background: #0d3d28; color: #6ddba9; }
+  .rdb-partial { background: var(--info-bg); color: var(--info-text); }
+  .rdb-fly     { background: var(--warn-bg); color: var(--warn-text); }
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
 /* ---- プラン作成セクション ---- */
 .plan-hdr {
   font-size: 15px;

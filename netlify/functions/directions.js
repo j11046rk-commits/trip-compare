@@ -40,9 +40,8 @@ exports.handler = async (event) => {
     }
   }
 
-  if (!mode || mode === 'transit') {
-    params.set('transit_mode', 'train|rail');
-  }
+  // transit_mode を絞らず、在来線・新幹線・地下鉄すべて含める
+  // （特急しおかぜ等の在来線特急も確実にルートに含めるため）
 
   if (mode === 'driving') {
     params.set('traffic_model', 'best_guess');
