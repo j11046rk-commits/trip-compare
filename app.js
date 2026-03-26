@@ -435,11 +435,12 @@ function parseYahooTransit(data, o, d) {
     const totalMin = parseInt(sumMove.Duration) || 0;
     if (!totalMin) continue;
 
-    // 料金: IC優先 → 現金 → 総額
-    const prices  = sumMove.Price || [];
-    const priceEl = prices.find(p => p.Type === 'IC')
-                 || prices.find(p => p.Type === '現金')
-                 || prices.find(p => p.Type === '総額');
+    // 料金: IC優先 → 現金 → 総額（単一オブジェクトの場合も配列化）
+    const rawPrices = sumMove.Price;
+    const prices    = Array.isArray(rawPrices) ? rawPrices : (rawPrices ? [rawPrices] : []);
+    const priceEl   = prices.find(p => p.Type === 'IC')
+                   || prices.find(p => p.Type === '現金')
+                   || prices.find(p => p.Type === '総額');
     const fare = priceEl ? parseInt(priceEl.Amount) : null;
 
     // ステップ構築（徒歩=Type"0"はスキップ、乗車=Type"1"のみ）
@@ -448,7 +449,7 @@ function parseYahooTransit(data, o, d) {
     steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${o.l}出発`]);
 
     for (const mv of detail) {
-      if (mv.Type !== '1') continue; // 徒歩スキップ
+      if (String(mv.Type) !== '1') continue; // 徒歩スキップ
       const lineName = mv.TransportName || '鉄道';
       lineNames.push(lineName);
       steps.push([yhTimeToHHMM(mv.DepartureTime), `${mv.DepartureStation}発（${lineName}）`]);
@@ -462,7 +463,7 @@ function parseYahooTransit(data, o, d) {
     }
 
     // 最初の乗車ステップの出発駅・時刻（15分前を「向かう時刻」とする）
-    const firstLeg  = detail.find(mv => mv.Type === '1');
+    const firstLeg  = detail.find(mv => String(mv.Type) === '1');
     const goToName  = firstLeg?.DepartureStation || o.l;
     const goToMin   = firstLeg ? yhTimeToMin(firstLeg.DepartureTime) - 15 : yhTimeToMin(sumMove.DepartureTime);
     const goToJP    = toJP(((goToMin % 1440) + 1440) % 1440);
@@ -485,11 +486,13 @@ function parseYahooTransit(data, o, d) {
 // ---- Yahoo! APIフェッチ（サーバー経由）----
 async function fetchYahooTransit(o, d, datetime, isArr) {
   const url = `/api/yahoo-transit?fromLat=${o.lat}&fromLng=${o.lng}&toLat=${d.lat}&toLng=${d.lng}&datetime=${datetime}&isarr=${isArr}`;
+  console.log('[Yahoo!transit] 呼び出し:', url);
   const res = await fetch(url);
   if (!res.ok) throw new Error('YAHOO_HTTP_' + res.status);
   const data = await res.json();
+  console.log('[Yahoo!transit] レスポンス status:', data.status, '/ Feature数:', data?.Feature?.length ?? 0, '/ ResultInfo:', data?.ResultInfo);
   if (data.status === 'NO_KEY')  throw new Error('NO_KEY');
-  if (data.status === 'ERROR' || data.status === 'API_ERROR') throw new Error(data.status);
+  if (data.status === 'ERROR' || data.status === 'API_ERROR') throw new Error(data.status + (data.code ? ':' + data.code : ''));
   return data;
 }
 
