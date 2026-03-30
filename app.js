@@ -488,16 +488,18 @@ function parseYahooTransit(data, o, d) {
   return scheds;
 }
 
-// ---- Yahoo! APIフェッチ（サーバー経由）----
+// ---- Yahoo!乗換案内スクレイピング（サーバー経由）----
 async function fetchYahooTransit(o, d, datetime, isArr) {
-  const url = `/api/yahoo-transit?fromLat=${o.lat}&fromLng=${o.lng}&toLat=${d.lat}&toLng=${d.lng}&datetime=${datetime}&isarr=${isArr}`;
-  console.log('[Yahoo!transit] 呼び出し:', url);
+  const fromStn = encodeURIComponent(shinkStn(o).replace('駅', ''));
+  const toStn   = encodeURIComponent(shinkStn(d).replace('駅', ''));
+  const url = `/api/yahoo-transit?fromStation=${fromStn}&toStation=${toStn}&datetime=${datetime}&isarr=${isArr}`;
+  console.log('[Yahoo!transit] 呼び出し:', decodeURIComponent(url));
   const res = await fetch(url);
   if (!res.ok) throw new Error('YAHOO_HTTP_' + res.status);
   const data = await res.json();
-  console.log('[Yahoo!transit] レスポンス status:', data.status, '/ Feature数:', data?.Feature?.length ?? 0, '/ ResultInfo:', data?.ResultInfo);
-  if (data.status === 'NO_KEY')  throw new Error('NO_KEY');
-  if (data.status === 'ERROR' || data.status === 'API_ERROR') throw new Error(data.status + (data.code ? ':' + data.code : ''));
+  console.log('[Yahoo!transit] Feature数:', data?.Feature?.length ?? 0, '/ status:', data?.status);
+  if (data.status === 'ERROR' || data.status === 'API_ERROR') throw new Error(data.status);
+  if (data.status === 'INVALID_REQUEST' || data.status === 'NO_RESULT') throw new Error(data.status);
   return data;
 }
 
