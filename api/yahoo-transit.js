@@ -119,9 +119,18 @@ function extractBySummaryRegex(html, dateStr) {
 
 // featureInfoList → Yahoo! API Feature形式に変換
 function buildFeatures(featureInfoList, dateStr, fromStation, toStation) {
+  // 所要時間が短い順にソートし、現実的な範囲（20時間以内）のみ対象にする
+  // （featureInfoListは現在時刻基準でSSR生成されるため深夜ルートが混入する場合がある）
+  const sorted = featureInfoList
+    .filter(f => {
+      const t = parseJpTime(f.summaryInfo?.totalTime || '');
+      return t > 0 && t < 1200;
+    })
+    .sort((a, b) => parseJpTime(a.summaryInfo.totalTime) - parseJpTime(b.summaryInfo.totalTime));
+
   const features = [];
 
-  for (const feat of featureInfoList.slice(0, 5)) {
+  for (const feat of sorted.slice(0, 5)) {
     const si = feat.summaryInfo;
     if (!si?.departureTime || !si?.arrivalTime || !si?.totalTime || !si?.totalPrice) continue;
 
@@ -134,38 +143,45 @@ function buildFeatures(featureInfoList, dateStr, fromStation, toStation) {
     const depFull = toYahooFmt(dateStr, si.departureTime);
     const arrFull = toYahooFmt(dateStr, si.arrivalTime, si.departureTime);
 
-    // edgeInfoList からDetail.Moveを構築
+    // edgeInfoList から全乗車区間を構築
+    // pointIcon: 0=最初の乗車駅, 3=乗換で次の電車に乗る駅, 2=乗換到着のみ, 1=最終到着
+    // timeInfo.type: 3=単一イベント, 2=到着(乗換前), 1=出発(乗換後)
     const detailMoves = [];
     const edges = feat.edgeInfoList || [];
-    for (let i = 0; i < edges.length; i++) {
-      const edge = edges[i];
-      if (edge.pointIcon !== 0) continue; // 出発駅のみ処理
 
+    for (let i = 0; i < edges.length - 1; i++) {
+      const edge     = edges[i];
       const nextEdge = edges[i + 1];
-      if (!nextEdge) continue;
 
-      const depName = edge.pointName  || edge.stationName  || fromStation.replace('駅', '');
-      const arrName = nextEdge.pointName || nextEdge.stationName || toStation.replace('駅', '');
-      const depTime = edge.timeInfo?.[0]?.time    || si.departureTime;
-      const arrTime = nextEdge.timeInfo?.[0]?.time || si.arrivalTime;
-      const railName = edge.railName || 'ＪＲ新幹線';
+      // railNameがない区間（徒歩等）はスキップ
+      if (!edge.railName) continue;
+
+      // この区間の出発時刻: type:3（単一）またはtype:1（乗換後出発）
+      const depInfo = edge.timeInfo?.find(t => t.type === 3) ||
+                      edge.timeInfo?.find(t => t.type === 1);
+      if (!depInfo) continue;
+
+      // 次駅への到着時刻: type:2（乗換前到着）またはtype:3（最終到着）
+      const arrInfo = nextEdge.timeInfo?.find(t => t.type === 2) ||
+                      nextEdge.timeInfo?.find(t => t.type === 3) ||
+                      nextEdge.timeInfo?.[0];
+      if (!arrInfo) continue;
 
       detailMoves.push({
-        Type:              '1',
-        TransportName:     railName,
-        DepartureStation:  depName,
-        ArrivalStation:    arrName,
-        DepartureTime:     toYahooFmt(dateStr, depTime),
-        ArrivalTime:       toYahooFmt(dateStr, arrTime, depTime),
+        Type:             '1',
+        TransportName:    edge.railName,
+        DepartureStation: edge.pointName  || edge.stationName  || fromStation,
+        ArrivalStation:   nextEdge.pointName || nextEdge.stationName || toStation,
+        DepartureTime:    toYahooFmt(dateStr, depInfo.time),
+        ArrivalTime:      toYahooFmt(dateStr, arrInfo.time, depInfo.time),
       });
     }
 
-    // detailMovesが空の場合は1ステップの概略を構築
+    // edgeInfoListが空の場合は1ステップの概略を構築
     if (!detailMoves.length) {
-      const railName = edges[0]?.railName || 'ＪＲ新幹線';
       detailMoves.push({
         Type:             '1',
-        TransportName:    railName,
+        TransportName:    edges[0]?.railName || 'ＪＲ',
         DepartureStation: fromStation.replace('駅', ''),
         ArrivalStation:   toStation.replace('駅', ''),
         DepartureTime:    depFull,

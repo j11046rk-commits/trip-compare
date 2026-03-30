@@ -490,8 +490,10 @@ function parseYahooTransit(data, o, d) {
 
 // ---- Yahoo!乗換案内スクレイピング（サーバー経由）----
 async function fetchYahooTransit(o, d, datetime, isArr) {
-  const fromStn = encodeURIComponent(shinkStn(o).replace('駅', ''));
-  const toStn   = encodeURIComponent(shinkStn(d).replace('駅', ''));
+  // 実際の出発地・目的地（市区名から「市」「区」等を除いた駅検索用文字列）を使う
+  // shinkStn(o) だと新幹線ハブ駅名になり、在来線アクセス区間が消えてしまうため
+  const fromStn = encodeURIComponent(o.l.replace(/[市区町村]$/, ''));
+  const toStn   = encodeURIComponent(d.l.replace(/[市区町村]$/, ''));
   const url = `/api/yahoo-transit?fromStation=${fromStn}&toStation=${toStn}&datetime=${datetime}&isarr=${isArr}`;
   console.log('[Yahoo!transit] 呼び出し:', decodeURIComponent(url));
   const res = await fetch(url);
