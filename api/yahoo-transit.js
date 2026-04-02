@@ -119,14 +119,19 @@ function extractBySummaryRegex(html, dateStr) {
 
 // featureInfoList → Yahoo! API Feature形式に変換
 function buildFeatures(featureInfoList, dateStr, fromStation, toStation) {
-  // 所要時間が短い順にソートし、現実的な範囲（20時間以内）のみ対象にする
-  // （featureInfoListは現在時刻基準でSSR生成されるため深夜ルートが混入する場合がある）
+  // 出発時刻の昇順にソートし、現実的な範囲（8時間以内）のみ対象にする
+  // ※Yahooの検索結果は指定時刻以降の便を返すため、出発時刻順が自然な表示順
   const sorted = featureInfoList
     .filter(f => {
       const t = parseJpTime(f.summaryInfo?.totalTime || '');
-      return t > 0 && t < 1200;
+      return t > 0 && t < 480; // 8時間以内のみ（長距離でも新幹線+在来線で8時間未満）
     })
-    .sort((a, b) => parseJpTime(a.summaryInfo.totalTime) - parseJpTime(b.summaryInfo.totalTime));
+    .sort((a, b) => {
+      // 出発時刻の昇順（HH:MM 文字列比較）
+      const depA = a.summaryInfo?.departureTime || '00:00';
+      const depB = b.summaryInfo?.departureTime || '00:00';
+      return depA.localeCompare(depB);
+    });
 
   const features = [];
 
