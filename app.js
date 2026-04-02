@@ -662,12 +662,12 @@ function parseYahooTransit(data, o, d) {
 
 // ---- Yahoo!乗換案内スクレイピング（サーバー経由）----
 async function fetchYahooTransit(o, d, datetime, isArr) {
-  // sam > 0（新幹線ハブへの在来線アクセスが必要）な都市はハブ駅から検索し、
+  // sam > 0 または stt != null（新幹線直通）の都市はshinkStn()で正確な駅名を使用
   // 在来線アクセス区間はparseYahooTransit内でdb.jsのsamを使って補完する
-  const fromStn = (o.sam > 0)
+  const fromStn = (o.sam > 0 || o.stt !== null)
     ? encodeURIComponent(shinkStn(o).replace('駅', ''))
     : encodeURIComponent(cleanCity(o.l));
-  const toStn = (d.sam > 0)
+  const toStn = (d.sam > 0 || d.stt !== null)
     ? encodeURIComponent(shinkStn(d).replace('駅', ''))
     : encodeURIComponent(cleanCity(d.l));
   const url = `/api/yahoo-transit?fromStation=${fromStn}&toStation=${toStn}&datetime=${datetime}&isarr=${isArr}`;
