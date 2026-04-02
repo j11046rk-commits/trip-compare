@@ -1,5 +1,5 @@
 // ---- 設定 ----
-const S = { trip: 'roundtrip', seat: 'ord', book: 'normal', air: 'fsc', priority: 'balanced' };
+const S = { trip: 'oneway', seat: 'ord', book: 'normal', air: 'fsc', priority: 'balanced' };
 const P = { mode: null, timeType: 'depart' };
 let G = { o: null, d: null, rd: 0, ld: 0 };
 let _scheds = [];
@@ -1353,6 +1353,9 @@ document.addEventListener('DOMContentLoaded', () => {
   buildPrefSel('dp');
   document.getElementById('op').value = '愛媛県';
   buildCitySel('oc', '愛媛県', 0);
+  document.getElementById('dp').value = '東京都';
+  buildCitySel('dc', '東京都', 1); // 中央区（index 1）
+  updateInfo();
   // クライアントキーがあれば Maps JS を事前ロード（検索時の遅延を減らす）
   if (getClientKey()) loadGoogleMaps().catch(() => {});
 });
