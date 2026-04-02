@@ -1053,8 +1053,11 @@ async function enrichWithRealData(results, o, d) {
       if (sumMove) {
         // DurationはAPIによって分/秒のどちらの場合もある。1440超なら秒とみなして変換
         // sam > 0 の都市はハブ駅間で検索したため、在来線アクセス時間を加算する
+        // 出発側にsam > 0 の場合は乗換バッファ10分も加算（parseYahooTransitと一致させる）
         const rawDur  = parseInt(sumMove.Duration) || 0;
-        const realMin = (rawDur > 1440 ? Math.round(rawDur / 60) : rawDur) + (o.sam || 0) + (d.sam || 0);
+        const hubMin  = rawDur > 1440 ? Math.round(rawDur / 60) : rawDur;
+        const transferBuf = (o.sam || 0) > 0 ? 10 : 0;
+        const realMin = hubMin + (o.sam || 0) + transferBuf + (d.sam || 0);
         // Price: 単一オブジェクトの場合も配列化
         const rawPrices = sumMove.Price;
         const prices    = Array.isArray(rawPrices) ? rawPrices : (rawPrices ? [rawPrices] : []);
