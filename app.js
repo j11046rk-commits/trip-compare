@@ -550,6 +550,8 @@ function toYahooDatetime(dateStr, timeStr) {
 }
 
 // ---- Yahoo!路線情報APIレスポンス解析 ----
+// 出発地→目的地を直接Yahoo検索するため、ここでは手動でアクセス区間を追加しない。
+// Yahoo自身がしおかぜ等の在来線特急も含む最適ルートと通し運賃を返す。
 function parseYahooTransit(data, o, d) {
   const features = data.Feature || [];
   const scheds = [];
@@ -567,7 +569,7 @@ function parseYahooTransit(data, o, d) {
     const totalMin = rawDur > 1440 ? Math.round(rawDur / 60) : rawDur;
     if (!totalMin) continue;
 
-    // 料金: IC優先 → 現金 → 総額（単一オブジェクトの場合も配列化）
+    // 料金: IC優先 → 現金 → 総額（通し運賃がそのまま返る）
     const rawPrices = sumMove.Price;
     const prices    = Array.isArray(rawPrices) ? rawPrices : (rawPrices ? [rawPrices] : []);
     const priceEl   = prices.find(p => p.Type === 'IC')
@@ -575,27 +577,11 @@ function parseYahooTransit(data, o, d) {
                    || prices.find(p => p.Type === '総額');
     const fare = priceEl ? parseInt(priceEl.Amount) : null;
 
-    // ---- 在来線アクセス補完（sam > 0 の都市はハブ駅から検索済み）----
-    const accessO  = o.sam || 0;
-    const accessD  = d.sam || 0;
-    const oHubStn  = shinkStn(o);
-    const dHubStn  = shinkStn(d);
-    const hubDepMin = yhTimeToMin(sumMove.DepartureTime);
-    const hubArrMin = yhTimeToMin(sumMove.ArrivalTime);
-
-    // ステップ構築（徒歩=Type"0"はスキップ、乗車=Type"1"のみ）
+    // ステップ構築: Yahooが返すroute全体をそのまま解析（在来線も含む）
     const steps     = [];
     const lineNames = [];
 
-    // 出発側アクセス（乗換10分前にハブ駅着とする）
-    if (accessO > 0) {
-      const hubArrivalMin = hubDepMin - 10;  // 新幹線発車10分前にハブ駅着
-      const cityDepMin = hubArrivalMin - accessO;
-      steps.push([toHHMM(cityDepMin),        `${o.l}出発（在来線）`]);
-      steps.push([toHHMM(hubArrivalMin),     `${oHubStn}着・乗換`]);
-    } else {
-      steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${o.l}出発`]);
-    }
+    steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${o.l}出発`]);
 
     for (const mv of detail) {
       if (String(mv.Type) !== '1') continue; // 徒歩スキップ
@@ -606,51 +592,26 @@ function parseYahooTransit(data, o, d) {
     }
     if (!lineNames.length) continue;
 
-    // 到着側アクセス
-    if (accessD > 0) {
-      if (steps[steps.length - 1]?.[0] !== yhTimeToHHMM(sumMove.ArrivalTime)) {
-        steps.push([yhTimeToHHMM(sumMove.ArrivalTime), `${dHubStn}着・乗換`]);
-      }
-      steps.push([toHHMM(hubArrMin + 10),             `${dHubStn}発（在来線）`]);
-      steps.push([toHHMM(hubArrMin + 10 + accessD),   `${d.l}到着`]);
-    } else {
-      const arrHHMM = yhTimeToHHMM(sumMove.ArrivalTime);
-      if (steps[steps.length - 1]?.[1] !== `${d.l}到着`) {
-        steps.push([arrHHMM, `${d.l}到着`]);
-      }
+    const arrHHMM = yhTimeToHHMM(sumMove.ArrivalTime);
+    if (steps[steps.length - 1]?.[1] !== `${d.l}到着`) {
+      steps.push([arrHHMM, `${d.l}到着`]);
     }
 
-    const transferBufO = accessO > 0 ? 10 : 0;  // 出発側乗換バッファ
-    const adjustedTotalMin = totalMin + accessO + transferBufO + accessD;
-    const depHHMM = accessO > 0 ? toHHMM(hubDepMin - transferBufO - accessO) : yhTimeToHHMM(sumMove.DepartureTime);
-    const arrHHMM = accessD > 0 ? toHHMM(hubArrMin + 10 + accessD) : yhTimeToHHMM(sumMove.ArrivalTime);
+    // goTo: 最初の乗車便の出発駅・15分前（向かう時刻）
+    const firstLeg = detail.find(mv => String(mv.Type) === '1');
+    const goToName = firstLeg?.DepartureStation || cleanCity(o.l) + '駅';
+    const goToMin  = firstLeg ? yhTimeToMin(firstLeg.DepartureTime) - 15 : yhTimeToMin(sumMove.DepartureTime);
+    const goToJP   = toJP(((goToMin % 1440) + 1440) % 1440);
 
-    // 最初の乗車ステップの出発駅・時刻（15分前を「向かう時刻」とする）
-    let goToName, goToMin;
-    if (accessO > 0) {
-      goToName = `${cleanCity(o.l)}駅`;
-      goToMin  = hubDepMin - transferBufO - accessO - 15;
-    } else {
-      const firstLeg = detail.find(mv => String(mv.Type) === '1');
-      goToName = firstLeg?.DepartureStation || o.l;
-      goToMin  = firstLeg ? yhTimeToMin(firstLeg.DepartureTime) - 15 : hubDepMin;
-    }
-    const goToJP = toJP(((goToMin % 1440) + 1440) % 1440);
-
-    // 在来線アクセス運賃をYahoo!運賃に加算
-    const localFareO = localFareEstimate(accessO);
-    const localFareD = localFareEstimate(accessD);
-    const totalFare = fare ? fare + localFareO + localFareD : null;
+    const depHHMM = yhTimeToHHMM(sumMove.DepartureTime);
 
     scheds.push({
       type: 'shink',
       depTime:  depHHMM,
       arrTime:  arrHHMM,
       rideOnly: lineNames.join(' → '),
-      totalMin: adjustedTotalMin,
-      fare: totalFare,
-      _localFareO: localFareO,
-      _localFareD: localFareD,
+      totalMin,
+      fare,
       steps,
       goTo: { time: goToJP, name: goToName },
       isReal: true,
@@ -662,14 +623,10 @@ function parseYahooTransit(data, o, d) {
 
 // ---- Yahoo!乗換案内スクレイピング（サーバー経由）----
 async function fetchYahooTransit(o, d, datetime, isArr) {
-  // sam > 0 または stt != null（新幹線直通）の都市はshinkStn()で正確な駅名を使用
-  // 在来線アクセス区間はparseYahooTransit内でdb.jsのsamを使って補完する
-  const fromStn = (o.sam > 0 || o.stt !== null)
-    ? encodeURIComponent(shinkStn(o).replace('駅', ''))
-    : encodeURIComponent(cleanCity(o.l));
-  const toStn = (d.sam > 0 || d.stt !== null)
-    ? encodeURIComponent(shinkStn(d).replace('駅', ''))
-    : encodeURIComponent(cleanCity(d.l));
+  // 出発地・目的地の都市名でYahoo!に直接検索させる（ハブ駅経由ではなく通し検索）
+  // Yahoo!が特急・新幹線の乗り継ぎと通し運賃を正確に計算してくれる
+  const fromStn = encodeURIComponent(cleanCity(o.l));
+  const toStn   = encodeURIComponent(cleanCity(d.l));
   const url = `/api/yahoo-transit?fromStation=${fromStn}&toStation=${toStn}&datetime=${datetime}&isarr=${isArr}`;
   console.log('[Yahoo!transit] 呼び出し:', decodeURIComponent(url));
   const res = await fetch(url);
@@ -1028,9 +985,8 @@ async function enrichWithRealData(results, o, d) {
   const park     = +document.getElementById('park').value   || 1500;
 
   // 現在日時を Yahoo! 形式に変換（YYYYMMDDHHMM）
-  // ハブ駅間で検索するため、出発側の在来線アクセス時間分を加算
-  const samAdjustMs = (o.sam || 0) * 60 * 1000;
-  const nowDt = new Date(ts * 1000 + samAdjustMs);
+  // 出発地→目的地を直接Yahoo検索するためsamAdjust不要
+  const nowDt = new Date(ts * 1000);
   const pad2  = n => String(n).padStart(2, '0');
   const yahooNowDt = `${nowDt.getFullYear()}${pad2(nowDt.getMonth()+1)}${pad2(nowDt.getDate())}${pad2(nowDt.getHours())}${pad2(nowDt.getMinutes())}`;
 
@@ -1052,12 +1008,9 @@ async function enrichWithRealData(results, o, d) {
       console.log('[enrich] sumMove:', JSON.stringify(sumMove));
       if (sumMove) {
         // DurationはAPIによって分/秒のどちらの場合もある。1440超なら秒とみなして変換
-        // sam > 0 の都市はハブ駅間で検索したため、在来線アクセス時間を加算する
-        // 出発側にsam > 0 の場合は乗換バッファ10分も加算（parseYahooTransitと一致させる）
+        // 出発地→目的地の直接検索のため、Yahooの返す時間・運賃をそのまま使用
         const rawDur  = parseInt(sumMove.Duration) || 0;
-        const hubMin  = rawDur > 1440 ? Math.round(rawDur / 60) : rawDur;
-        const transferBuf = (o.sam || 0) > 0 ? 10 : 0;
-        const realMin = hubMin + (o.sam || 0) + transferBuf + (d.sam || 0);
+        const realMin = rawDur > 1440 ? Math.round(rawDur / 60) : rawDur;
         // Price: 単一オブジェクトの場合も配列化
         const rawPrices = sumMove.Price;
         const prices    = Array.isArray(rawPrices) ? rawPrices : (rawPrices ? [rawPrices] : []);
@@ -1065,19 +1018,16 @@ async function enrichWithRealData(results, o, d) {
                        || prices.find(p => p.Type === '現金')
                        || prices.find(p => p.Type === '総額');
         const yahooFare = priceEl ? parseInt(priceEl.Amount) : null;
-        // 在来線アクセス運賃を加算（Yahoo!はハブ駅間のみの運賃）
-        const localFareO = localFareEstimate(o.sam || 0);
-        const localFareD = localFareEstimate(d.sam || 0);
-        const fare = yahooFare ? yahooFare + localFareO + localFareD : null;
-        console.log('[enrich] realMin:', realMin, '/ yahooFare:', yahooFare, '/ localFareO:', localFareO, '/ localFareD:', localFareD, '/ totalFare:', fare);
+        console.log('[enrich] realMin:', realMin, '/ yahooFare:', yahooFare);
 
         if (realMin) shinkR.tm = realMin * trips;
-        if (fare) {
-          shinkR.tc = fare * pax * trips;
-          shinkR.bd['新幹線料金'] = yahooFare ? yahooFare * pax * trips : 0;
-          if (localFareO + localFareD > 0) {
-            shinkR.bd['在来線アクセス'] = (localFareO + localFareD) * pax * trips;
-          }
+        if (yahooFare) {
+          shinkR.tc = yahooFare * pax * trips;
+          // 内訳をYahooの通し運賃に更新（ハブ分割の概算を上書き）
+          shinkR.bd = {
+            'Yahoo!通し運賃(IC)': yahooFare * pax * trips,
+            '機会損失': Math.round(shinkR.op),
+          };
         }
         shinkR.op        = opp(shinkR.tm, 0.40, hourly, pax);
         shinkR.two       = shinkR.tc + shinkR.op;
@@ -1227,13 +1177,9 @@ async function searchSchedule() {
   try {
     if (P.mode === 'shink') {
       let scheds = null;
-      // Yahoo検索はハブ駅間で行うため、在来線アクセス時間分だけ時刻をずらす
-      // 出発モード: ユーザー出発時刻 + 出発側sam = ハブ駅出発時刻
-      // 到着モード: ユーザー到着時刻 - 到着側sam = ハブ駅到着時刻
-      const samAdjust = isArr ? -(d.sam || 0) : (o.sam || 0);
-      const adjMin = tMin + samAdjust;
-      const adjTimeStr = toHHMM(adjMin);
-      const datetime = toYahooDatetime(dateStr, adjTimeStr);
+      // 出発地→目的地を直接Yahoo検索するためsamAdjust不要
+      // ユーザー指定の時刻をそのままYahoo!に渡す
+      const datetime = toYahooDatetime(dateStr, timeStr);
 
       let dataSource = 'est'; // 'yahoo', 'google', 'est'
 
