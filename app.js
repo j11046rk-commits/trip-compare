@@ -12,7 +12,12 @@ function hav(la1, lo1, la2, lo2) {
   return 2 * R * Math.asin(Math.sqrt(x * x + Math.cos(la1 * r) * Math.cos(la2 * r) * y * y));
 }
 const fmt  = n => Math.round(n).toLocaleString('ja-JP');
-const fmtM = m => { if (!m && m !== 0) return '—'; const h = Math.floor(m / 60), mn = m % 60; return h > 0 ? `${h}時間${mn > 0 ? mn + '分' : ''}` : `${mn}分`; };
+const fmtM = m => { if (m == null || isNaN(m)) return '—'; const h = Math.floor(m / 60), mn = m % 60; return h > 0 ? `${h}時間${mn > 0 ? mn + '分' : ''}` : `${mn}分`; };
+// 都市名 → Yahoo検索用の駅名クリーン化 (「さいたま市大宮区」→「さいたま」、「千代田区」→「千代田」、「盛岡市」→「盛岡」)
+function cleanCity(name) {
+  if (/^(.+)市.+区$/.test(name)) return name.match(/^(.+)市/)[1];
+  return name.replace(/[市区町村]$/, '');
+}
 const opp  = (min, rate, h, pax) => h > 0 ? (min / 60) * h * rate * pax : 0;
 
 // ---- 時刻ユーティリティ ----
@@ -52,15 +57,114 @@ function getCity(side) {
 }
 
 // ---- 新幹線ハブ駅名 ----
+// stt/hubStt → 駅名（路線別に正しくマッピング）
+// 同じstt値が東海道系と東北系で重複するため、都道府県で路線を判定して解決する
 const HUB_NAME = { 0:'東京', 36:'上野', 99:'名古屋', 138:'新大阪', 170:'新神戸', 202:'岡山', 231:'広島', 256:'新山口', 280:'小倉', 295:'博多', 34:'大宮', 84:'仙台', 161:'新青森', 208:'新函館北斗', 110:'新潟', 75:'長野', 65:'高崎', 200:'鹿児島中央' };
 
+// 都道府県 → 路線系統
+const PREF_LINE = {
+  '北海道':'tohoku','青森県':'tohoku','岩手県':'tohoku','宮城県':'tohoku',
+  '秋田県':'tohoku','山形県':'tohoku','福島県':'tohoku',
+  '茨城県':'tohoku','栃木県':'tohoku','群馬県':'joetsu',
+  '埼玉県':'tohoku','千葉県':'tokaido','東京都':'tokaido','神奈川県':'tokaido',
+  '新潟県':'joetsu','富山県':'hokuriku','石川県':'hokuriku','福井県':'hokuriku',
+  '山梨県':'tokaido','長野県':'hokuriku','岐阜県':'tokaido','静岡県':'tokaido',
+  '愛知県':'tokaido','三重県':'tokaido',
+  '滋賀県':'tokaido','京都府':'tokaido','大阪府':'tokaido','兵庫県':'sanyo',
+  '奈良県':'tokaido','和歌山県':'tokaido',
+  '鳥取県':'sanyo','島根県':'sanyo','岡山県':'sanyo','広島県':'sanyo','山口県':'sanyo',
+  '徳島県':'sanyo','香川県':'sanyo','愛媛県':'sanyo','高知県':'sanyo',
+  '福岡県':'kyushu','佐賀県':'kyushu','長崎県':'kyushu','熊本県':'kyushu',
+  '大分県':'kyushu','宮崎県':'kyushu','鹿児島県':'kyushu','沖縄県':null,
+};
+
+// stt値 → 駅名マッピング（路線別。同じ値で異なる駅がある場合は路線で解決）
+const STT_STATION = {
+  // === 東海道・山陽・九州 ===
+  'tokaido:0':'東京','tokaido:18':'新横浜','tokaido:38':'小田原',
+  'tokaido:45':'浜松','tokaido:52':'三島','tokaido:60':'静岡',
+  'tokaido:68':'静岡','tokaido:74':'浜松','tokaido:76':'浜松',
+  'tokaido:80':'豊橋','tokaido:82':'名古屋','tokaido:88':'名古屋',
+  'tokaido:99':'名古屋','tokaido:121':'米原','tokaido:126':'京都',
+  'tokaido:130':'京都','tokaido:131':'京都','tokaido:133':'京都',
+  'tokaido:138':'新大阪','tokaido:145':'新大阪',
+  'tokaido:155':'新大阪','tokaido:28':'東京',
+  'sanyo:145':'新神戸','sanyo:155':'新神戸',
+  'sanyo:170':'新神戸','sanyo:202':'岡山','sanyo:215':'福山',
+  'sanyo:231':'広島','sanyo:243':'新岩国','sanyo:256':'新山口',
+  'sanyo:261':'新山口','sanyo:272':'新下関','sanyo:280':'小倉','sanyo:295':'博多',
+  'kyushu:295':'博多','kyushu:327':'熊本','kyushu:330':'博多',
+  'kyushu:357':'新八代','kyushu:365':'鹿児島中央','kyushu:280':'小倉',
+  'kyushu:256':'新山口','kyushu:272':'小倉',
+  // === 東北・秋田・山形 ===
+  'tohoku:0':'東京','tohoku:26':'大宮','tohoku:28':'大宮','tohoku:34':'大宮',
+  'tohoku:36':'上野','tohoku:38':'熊谷',
+  'tohoku:48':'宇都宮','tohoku:40':'小山',
+  'tohoku:72':'郡山','tohoku:74':'福島','tohoku:76':'福島',
+  'tohoku:80':'福島','tohoku:82':'福島',
+  'tohoku:84':'仙台','tohoku:88':'仙台',
+  'tohoku:100':'仙台','tohoku:101':'仙台','tohoku:102':'仙台',
+  'tohoku:110':'山形','tohoku:112':'米沢',
+  'tohoku:115':'一関','tohoku:130':'新花巻','tohoku:131':'北上',
+  'tohoku:138':'盛岡','tohoku:145':'秋田',
+  'tohoku:155':'大曲','tohoku:160':'八戸','tohoku:168':'新青森',
+  'tohoku:175':'新青森',
+  'tohoku:200':'新青森','tohoku:208':'新函館北斗',
+  // === 上越 ===
+  'joetsu:0':'東京','joetsu:26':'大宮','joetsu:34':'大宮',
+  'joetsu:38':'熊谷','joetsu:48':'高崎','joetsu:65':'高崎',
+  'joetsu:88':'長岡','joetsu:100':'新潟','joetsu:110':'新潟',
+  // === 北陸 ===
+  'hokuriku:0':'東京','hokuriku:26':'大宮','hokuriku:34':'大宮',
+  'hokuriku:65':'高崎','hokuriku:68':'佐久平','hokuriku:74':'上田',
+  'hokuriku:75':'長野','hokuriku:82':'長野',
+  'hokuriku:121':'福井','hokuriku:122':'富山','hokuriku:126':'金沢',
+  'hokuriku:130':'金沢','hokuriku:131':'金沢','hokuriku:133':'金沢',
+};
+
+// 都道府県のデフォルトハブ駅（STT_STATIONにも見つからないフォールバック）
+const PREF_DEFAULT_HUB = {
+  '北海道':'新函館北斗','青森県':'新青森','岩手県':'盛岡','宮城県':'仙台',
+  '秋田県':'秋田','山形県':'山形','福島県':'郡山',
+  '茨城県':'上野','栃木県':'宇都宮','群馬県':'高崎',
+  '埼玉県':'大宮','千葉県':'東京','東京都':'東京','神奈川県':'新横浜',
+  '新潟県':'新潟','富山県':'富山','石川県':'金沢','福井県':'福井',
+  '山梨県':'東京','長野県':'長野','岐阜県':'名古屋','静岡県':'静岡',
+  '愛知県':'名古屋','三重県':'名古屋',
+  '滋賀県':'京都','京都府':'京都','大阪府':'新大阪','兵庫県':'新神戸',
+  '奈良県':'京都','和歌山県':'新大阪',
+  '鳥取県':'岡山','島根県':'岡山','岡山県':'岡山','広島県':'広島','山口県':'新山口',
+  '徳島県':'岡山','香川県':'岡山','愛媛県':'岡山','高知県':'岡山',
+  '福岡県':'博多','佐賀県':'博多','長崎県':'博多','熊本県':'熊本',
+  '大分県':'小倉','宮崎県':'鹿児島中央','鹿児島県':'鹿児島中央',
+};
+
+function resolveStation(sttVal, pref) {
+  const line = PREF_LINE[pref];
+  if (line) {
+    const name = STT_STATION[`${line}:${sttVal}`];
+    if (name) return name;
+  }
+  // フォールバック: 全路線から検索
+  for (const key of Object.keys(STT_STATION)) {
+    if (key.endsWith(`:${sttVal}`)) return STT_STATION[key];
+  }
+  return null;
+}
+
 function shinkStn(c) {
-  if (c.stt !== null && HUB_NAME[c.stt]) return HUB_NAME[c.stt] + '駅';
-  if (c.stt !== null) return c.l + '駅';
-  if (HUB_NAME[c.hubStt]) return HUB_NAME[c.hubStt] + '駅';
-  const hubs = Object.keys(HUB_NAME).map(Number);
-  const closest = hubs.reduce((p, cur) => Math.abs(cur - c.hubStt) < Math.abs(p - c.hubStt) ? cur : p);
-  return HUB_NAME[closest] + '駅';
+  // 直通新幹線駅がある都市
+  if (c.stt !== null) {
+    const name = resolveStation(c.stt, c.pref);
+    if (name) return name + '駅';
+    // フォールバック: 市区町村名から駅名を推定
+    return cleanCity(c.l) + '駅';
+  }
+  // ハブ駅経由の都市
+  const name = resolveStation(c.hubStt, c.pref);
+  if (name) return name + '駅';
+  // 最終フォールバック: 都道府県デフォルト
+  return (PREF_DEFAULT_HUB[c.pref] || '東京') + '駅';
 }
 
 // ---- 空港情報 ----
@@ -208,6 +312,25 @@ function togPlan(type, btn) {
   document.getElementById('plan-time-label').textContent = type === 'arrive' ? '到着希望時刻' : '出発予定時刻';
 }
 
+// ---- 在来線アクセス運賃概算 ----
+// sam（ハブ駅までの所要分）からJR在来線の概算運賃を算出
+// JR在来線運賃テーブル（営業キロ基準）: 所要分 → 概算距離 → 運賃
+function localFareEstimate(samMin) {
+  if (!samMin || samMin <= 0) return 0;
+  // 在来線は概ね時速60km（特急）～40km（普通）→ 平均50km/h ≒ samMin * 0.83km
+  const km = samMin * 0.83;
+  // JR在来線運賃概算（自由席特急料金込み）
+  if (km <= 10) return 200;
+  if (km <= 20) return 420;
+  if (km <= 30) return 590;
+  if (km <= 40) return 770;
+  if (km <= 50) return 990;
+  if (km <= 60) return 1170;
+  if (km <= 80) return 1520;
+  if (km <= 100) return 1980;
+  return Math.round(1980 + (km - 100) * 20);
+}
+
 // ==== リアルデータ取得 ====
 
 // ---- タイムアウトラッパー ----
@@ -253,7 +376,11 @@ function loadGoogleMaps() {
     if (!key) { reject(new Error('NO_KEY')); return; }
     if (_gmLoaded) { resolve(); return; }
     if (_gmLoading) {
-      const t = setInterval(() => { if (_gmLoaded) { clearInterval(t); resolve(); } }, 200);
+      let waited = 0;
+      const t = setInterval(() => {
+        if (_gmLoaded) { clearInterval(t); resolve(); }
+        else if ((waited += 200) > 15000) { clearInterval(t); reject(new Error('LOAD_TIMEOUT')); }
+      }, 200);
       return;
     }
     _gmLoading = true;
@@ -460,11 +587,12 @@ function parseYahooTransit(data, o, d) {
     const steps     = [];
     const lineNames = [];
 
-    // 出発側アクセス
+    // 出発側アクセス（乗換10分前にハブ駅着とする）
     if (accessO > 0) {
-      const cityDepMin = hubDepMin - accessO;
-      steps.push([toHHMM(cityDepMin),               `${o.l}出発（在来線特急）`]);
-      steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${oHubStn}着・乗換`]);
+      const hubArrivalMin = hubDepMin - 10;  // 新幹線発車10分前にハブ駅着
+      const cityDepMin = hubArrivalMin - accessO;
+      steps.push([toHHMM(cityDepMin),        `${o.l}出発（在来線）`]);
+      steps.push([toHHMM(hubArrivalMin),     `${oHubStn}着・乗換`]);
     } else {
       steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${o.l}出発`]);
     }
@@ -483,7 +611,7 @@ function parseYahooTransit(data, o, d) {
       if (steps[steps.length - 1]?.[0] !== yhTimeToHHMM(sumMove.ArrivalTime)) {
         steps.push([yhTimeToHHMM(sumMove.ArrivalTime), `${dHubStn}着・乗換`]);
       }
-      steps.push([toHHMM(hubArrMin + 10),             `${dHubStn}発（在来線特急）`]);
+      steps.push([toHHMM(hubArrMin + 10),             `${dHubStn}発（在来線）`]);
       steps.push([toHHMM(hubArrMin + 10 + accessD),   `${d.l}到着`]);
     } else {
       const arrHHMM = yhTimeToHHMM(sumMove.ArrivalTime);
@@ -492,15 +620,16 @@ function parseYahooTransit(data, o, d) {
       }
     }
 
-    const adjustedTotalMin = totalMin + accessO + accessD;
-    const depHHMM = accessO > 0 ? toHHMM(hubDepMin - accessO) : yhTimeToHHMM(sumMove.DepartureTime);
+    const transferBufO = accessO > 0 ? 10 : 0;  // 出発側乗換バッファ
+    const adjustedTotalMin = totalMin + accessO + transferBufO + accessD;
+    const depHHMM = accessO > 0 ? toHHMM(hubDepMin - transferBufO - accessO) : yhTimeToHHMM(sumMove.DepartureTime);
     const arrHHMM = accessD > 0 ? toHHMM(hubArrMin + 10 + accessD) : yhTimeToHHMM(sumMove.ArrivalTime);
 
     // 最初の乗車ステップの出発駅・時刻（15分前を「向かう時刻」とする）
     let goToName, goToMin;
     if (accessO > 0) {
-      goToName = `${o.l.replace(/[市区町村]$/, '')}駅`;
-      goToMin  = hubDepMin - accessO - 15;
+      goToName = `${cleanCity(o.l)}駅`;
+      goToMin  = hubDepMin - transferBufO - accessO - 15;
     } else {
       const firstLeg = detail.find(mv => String(mv.Type) === '1');
       goToName = firstLeg?.DepartureStation || o.l;
@@ -508,16 +637,24 @@ function parseYahooTransit(data, o, d) {
     }
     const goToJP = toJP(((goToMin % 1440) + 1440) % 1440);
 
+    // 在来線アクセス運賃をYahoo!運賃に加算
+    const localFareO = localFareEstimate(accessO);
+    const localFareD = localFareEstimate(accessD);
+    const totalFare = fare ? fare + localFareO + localFareD : null;
+
     scheds.push({
       type: 'shink',
       depTime:  depHHMM,
       arrTime:  arrHHMM,
       rideOnly: lineNames.join(' → '),
       totalMin: adjustedTotalMin,
-      fare,
+      fare: totalFare,
+      _localFareO: localFareO,
+      _localFareD: localFareD,
       steps,
       goTo: { time: goToJP, name: goToName },
       isReal: true,
+      _source: 'yahoo',
     });
   }
   return scheds;
@@ -529,10 +666,10 @@ async function fetchYahooTransit(o, d, datetime, isArr) {
   // 在来線アクセス区間はparseYahooTransit内でdb.jsのsamを使って補完する
   const fromStn = (o.sam > 0)
     ? encodeURIComponent(shinkStn(o).replace('駅', ''))
-    : encodeURIComponent(o.l.replace(/[市区町村]$/, ''));
+    : encodeURIComponent(cleanCity(o.l));
   const toStn = (d.sam > 0)
     ? encodeURIComponent(shinkStn(d).replace('駅', ''))
-    : encodeURIComponent(d.l.replace(/[市区町村]$/, ''));
+    : encodeURIComponent(cleanCity(d.l));
   const url = `/api/yahoo-transit?fromStation=${fromStn}&toStation=${toStn}&datetime=${datetime}&isarr=${isArr}`;
   console.log('[Yahoo!transit] 呼び出し:', decodeURIComponent(url));
   const res = await fetch(url);
@@ -715,14 +852,23 @@ function calc() {
   if (canShink(o, d)) {
     const st = shinkMin1(o, d), tm = st * trips;
     const accessKm = (o.stt === null ? (o.sam || 0) : 0) + (d.stt === null ? (d.sam || 0) : 0);
-    const fare = shinkFare(Math.round(ld * 1.2 + accessKm)) * gM * bD + ((o.sam > 0 ? 1000 : 0) + (d.sam > 0 ? 1000 : 0));
+    const localFareO = localFareEstimate(o.sam || 0);
+    const localFareD = localFareEstimate(d.sam || 0);
+    const fare = shinkFare(Math.round(ld * 1.2 + accessKm)) * gM * bD + localFareO + localFareD;
     const tc = fare * pax * trips;
     const op1 = opp(tm, 0.40, hourly, pax);
+    const oHub = shinkStn(o).replace('駅', '');
+    const dHub = shinkStn(d).replace('駅', '');
+    const shinkOnlyFare = Math.round(shinkFare(Math.round(ld * 1.2 + accessKm)) * gM * bD);
+    const localTotal = localFareO + localFareD;
+    const bd = { '新幹線料金': shinkOnlyFare * pax * trips };
+    if (localTotal > 0) bd['在来線アクセス'] = localTotal * pax * trips;
+    bd['機会損失'] = Math.round(op1);
     results.push({
       id: 'shink', name: '新幹線', icon: '🚅',
       tc, tm, op: op1, two: tc + op1, fat: st > 180 ? 3 : 2, flex: 4,
-      route: `${o.l}${o.stt === null && o.sam > 0 ? `→${HUB_NAME[o.hubStt] || '乗換'}(乗換)` : ''}→新幹線→${d.stt === null && d.sam > 0 ? `(乗換)${HUB_NAME[d.hubStt] || ''}→` : ''}${d.l}`,
-      bd: { '新幹線料金': Math.round(fare * pax * trips), '機会損失': Math.round(op1) },
+      route: `${o.l}${o.sam > 0 ? `→${oHub}(乗換)` : ''}→新幹線→${d.sam > 0 ? `(乗換)${dHub}→` : ''}${d.l}`,
+      bd,
     });
   }
 
@@ -849,8 +995,10 @@ function renderCards(results, winner) {
   }).join('');
 
   const mkC = (id, vFn, lFn) => {
-    const mx = Math.max(...results.map(vFn));
-    document.getElementById(id).innerHTML = results.map(r => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const mx = Math.max(...results.map(vFn)) || 1;
+    el.innerHTML = results.map(r => {
       const w  = Math.max(8, Math.round((vFn(r) / mx) * 100));
       const bd = Object.entries(r.bd).filter(([k]) => k !== '機会損失').map(([k, v]) => `${k}:¥${fmt(v)}`).join(' / ');
       return `<div class="brow">
@@ -880,7 +1028,9 @@ async function enrichWithRealData(results, o, d) {
   const park     = +document.getElementById('park').value   || 1500;
 
   // 現在日時を Yahoo! 形式に変換（YYYYMMDDHHMM）
-  const nowDt = new Date(ts * 1000);
+  // ハブ駅間で検索するため、出発側の在来線アクセス時間分を加算
+  const samAdjustMs = (o.sam || 0) * 60 * 1000;
+  const nowDt = new Date(ts * 1000 + samAdjustMs);
   const pad2  = n => String(n).padStart(2, '0');
   const yahooNowDt = `${nowDt.getFullYear()}${pad2(nowDt.getMonth()+1)}${pad2(nowDt.getDate())}${pad2(nowDt.getHours())}${pad2(nowDt.getMinutes())}`;
 
@@ -911,13 +1061,20 @@ async function enrichWithRealData(results, o, d) {
         const priceEl   = prices.find(p => p.Type === 'IC')
                        || prices.find(p => p.Type === '現金')
                        || prices.find(p => p.Type === '総額');
-        const fare = priceEl ? parseInt(priceEl.Amount) : null;
-        console.log('[enrich] realMin:', realMin, '/ fare:', fare, '/ prices:', JSON.stringify(prices));
+        const yahooFare = priceEl ? parseInt(priceEl.Amount) : null;
+        // 在来線アクセス運賃を加算（Yahoo!はハブ駅間のみの運賃）
+        const localFareO = localFareEstimate(o.sam || 0);
+        const localFareD = localFareEstimate(d.sam || 0);
+        const fare = yahooFare ? yahooFare + localFareO + localFareD : null;
+        console.log('[enrich] realMin:', realMin, '/ yahooFare:', yahooFare, '/ localFareO:', localFareO, '/ localFareD:', localFareD, '/ totalFare:', fare);
 
         if (realMin) shinkR.tm = realMin * trips;
         if (fare) {
           shinkR.tc = fare * pax * trips;
-          shinkR.bd['新幹線料金'] = fare * pax * trips;
+          shinkR.bd['新幹線料金'] = yahooFare ? yahooFare * pax * trips : 0;
+          if (localFareO + localFareD > 0) {
+            shinkR.bd['在来線アクセス'] = (localFareO + localFareD) * pax * trips;
+          }
         }
         shinkR.op        = opp(shinkR.tm, 0.40, hourly, pax);
         shinkR.two       = shinkR.tc + shinkR.op;
@@ -941,7 +1098,7 @@ async function enrichWithRealData(results, o, d) {
     if (drivingRes.status === 'fulfilled') {
       const data = drivingRes.value;
       const leg  = data.routes?.[0]?.legs?.[0];
-      if (leg) {
+      if (leg?.duration?.value && leg?.distance?.value) {
         const realMin = Math.round((leg.duration_in_traffic?.value || leg.duration.value) / 60);
         const realKm  = Math.round(leg.distance.value / 1000);
         const fuel    = (realKm / mpg) * gasp;
@@ -993,8 +1150,8 @@ async function enrichWithRealData(results, o, d) {
     const badge = document.getElementById(`badge-${r.id}`);
     if (badge && r._enriched) {
       badge.textContent = r._realFare
-        ? (r.id === 'car' ? `✅ 実ルート ${r._realKm}km / 交通量込み` : '✅ 実データ（時間・料金）')
-        : '⏱ 時間:実データ / 料金:概算';
+        ? (r.id === 'car' ? `✅ 実ルート ${r._realKm}km / 交通量込み` : '✅ Yahoo!乗換案内 実データ（時間・料金）')
+        : '⏱ Yahoo!乗換案内 時間:実データ / 料金:概算';
       badge.className = 'real-badge ' + (r._realFare ? 'rdb-ok' : 'rdb-partial');
     }
 
@@ -1011,8 +1168,10 @@ async function enrichWithRealData(results, o, d) {
 
   // バーチャート更新
   const mkC = (id, vFn, lFn) => {
-    const mx = Math.max(...results.map(vFn));
-    document.getElementById(id).innerHTML = results.map(r => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const mx = Math.max(...results.map(vFn)) || 1;
+    el.innerHTML = results.map(r => {
       const w  = Math.max(8, Math.round((vFn(r) / mx) * 100));
       const bd = Object.entries(r.bd).filter(([k]) => k !== '機会損失').map(([k, v]) => `${k}:¥${fmt(v)}`).join(' / ');
       return `<div class="brow">
@@ -1065,12 +1224,23 @@ async function searchSchedule() {
   try {
     if (P.mode === 'shink') {
       let scheds = null;
-      const datetime = toYahooDatetime(dateStr, timeStr);
+      // Yahoo検索はハブ駅間で行うため、在来線アクセス時間分だけ時刻をずらす
+      // 出発モード: ユーザー出発時刻 + 出発側sam = ハブ駅出発時刻
+      // 到着モード: ユーザー到着時刻 - 到着側sam = ハブ駅到着時刻
+      const samAdjust = isArr ? -(d.sam || 0) : (o.sam || 0);
+      const adjMin = tMin + samAdjust;
+      const adjTimeStr = toHHMM(adjMin);
+      const datetime = toYahooDatetime(dateStr, adjTimeStr);
+
+      let dataSource = 'est'; // 'yahoo', 'google', 'est'
 
       // ① Yahoo!路線情報API（実運賃・実時刻）
       try {
         const data = await withTimeout(fetchYahooTransit(o, d, datetime, isArr), 12000);
-        if (data?.Feature?.length) scheds = parseYahooTransit(data, o, d);
+        if (data?.Feature?.length) {
+          scheds = parseYahooTransit(data, o, d);
+          dataSource = 'yahoo';
+        }
       } catch (e) {
         if (e.message !== 'NO_KEY') console.warn('Yahoo transit:', e.message);
       }
@@ -1082,6 +1252,7 @@ async function searchSchedule() {
           scheds = data._fromSDK
             ? parseTransitFromSDK(data, o, d)
             : parseTransitFromREST(data, o, d);
+          dataSource = 'google';
         }
       }
 
@@ -1092,6 +1263,7 @@ async function searchSchedule() {
       renderSchedules(scheds, {
         extLink: yahooTransitLink(o, d, dateStr, timeStr, isArr),
         extLinkLabel: 'Yahoo!乗換案内で実際の時刻を確認',
+        dataSource,
       });
 
     } else if (P.mode === 'fly') {
@@ -1106,7 +1278,7 @@ async function searchSchedule() {
     } else if (P.mode === 'car') {
       let depTimeStr = timeStr;
       if (isArr) {
-        const estMin = Math.round((rd / 90) * 60) + (rd > 300 ? 30 : 0);
+        const estMin = Math.round((rd / 90) * 60) + (rd > 500 ? 60 : rd > 300 ? 30 : 0);
         depTimeStr = toHHMM(tMin - estMin);
       }
       const depTs = toUnix(dateStr, depTimeStr);
@@ -1135,12 +1307,14 @@ async function searchSchedule() {
 
 // ---- スケジュール表示 ----
 function renderSchedules(scheds, opts = {}) {
-  const { extLink, extLinkLabel, isFlight } = opts;
+  const { extLink, extLinkLabel, isFlight, dataSource } = opts;
   const el = document.getElementById('schedule-list');
 
   const isReal = scheds.some(s => s.isReal);
   let banner = '';
-  if (isReal) {
+  if (dataSource === 'yahoo') {
+    banner = `<div class="sched-banner real">✅ Yahoo!乗換案内の実データを取得しました</div>`;
+  } else if (dataSource === 'google' || (isReal && !isFlight)) {
     banner = `<div class="sched-banner real">✅ Google Maps のリアルタイムデータを取得しました</div>`;
   } else if (isFlight) {
     banner = `<div class="sched-banner est">📊 フライトは推定スケジュールです。実際の便は下のボタンから検索してください。</div>`;
@@ -1183,9 +1357,12 @@ function pickSchedule(idx) {
       <div class="it-lbl">${l}</div>
     </div>`).join('');
 
+  const badgeText = s._source === 'yahoo' ? '✅ Yahoo!乗換案内 実データ'
+                  : s._source === 'google' ? '✅ Google Maps リアルタイムデータ'
+                  : s.isReal ? '✅ リアルタイムデータ' : '📊 概算データ';
   const badge = s.isReal
-    ? `<div class="final-data-badge real-badge">✅ Google Maps リアルタイムデータ</div>`
-    : `<div class="final-data-badge est-badge">📊 概算データ</div>`;
+    ? `<div class="final-data-badge real-badge">${badgeText}</div>`
+    : `<div class="final-data-badge est-badge">${badgeText}</div>`;
 
   document.getElementById('final-guide').innerHTML = `
     <div class="final-box">
@@ -1200,7 +1377,7 @@ function pickSchedule(idx) {
         <div class="itin-ttl">📋 行程</div>
         ${itin}
       </div>
-      <p class="note">※${s.isReal ? '経路・時刻はGoogle Mapsデータに基づきます。' : '時刻は概算です。'}実際の運賃・時刻は各交通機関の公式サイトでご確認ください。</p>
+      <p class="note">※${s._source === 'yahoo' ? '経路・時刻・運賃はYahoo!乗換案内のデータに基づきます。' : s.isReal ? '経路・時刻はGoogle Mapsデータに基づきます。' : '時刻は概算です。'}実際の運賃・時刻は各交通機関の公式サイトでご確認ください。</p>
     </div>`;
   document.getElementById('plan-step5').style.display = 'block';
   document.getElementById('plan-step5').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
