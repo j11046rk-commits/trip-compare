@@ -904,7 +904,9 @@ function calc() {
   ['plan-step3','plan-step4','plan-step5'].forEach(id => document.getElementById(id).style.display = 'none');
   P.mode = null;
   document.querySelectorAll('.plan-mode-btn').forEach(b => b.classList.remove('on'));
-  document.getElementById('plan-date').value = new Date().toISOString().split('T')[0];
+  const _now = new Date();
+  document.getElementById('plan-date').value = _now.toISOString().split('T')[0];
+  document.getElementById('plan-time').value = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
 
   // バックグラウンドでリアルデータ取得・反映
   enrichWithRealData(results, o, d).catch(() => {
