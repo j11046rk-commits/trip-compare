@@ -904,7 +904,7 @@ function calc() {
   ['plan-step3','plan-step4','plan-step5'].forEach(id => document.getElementById(id).style.display = 'none');
   P.mode = null;
   document.querySelectorAll('.plan-mode-btn').forEach(b => b.classList.remove('on'));
-  const _now = new Date();
+  const _now = new Date(Date.now() + 5 * 60 * 1000); // 現在時刻+5分
   document.getElementById('plan-date').value = _now.toISOString().split('T')[0];
   document.getElementById('plan-time').value = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`;
 
