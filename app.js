@@ -577,24 +577,34 @@ function parseYahooTransit(data, o, d) {
                    || prices.find(p => p.Type === '総額');
     const fare = priceEl ? parseInt(priceEl.Amount) : null;
 
-    // ステップ構築: Yahooが返すroute全体をそのまま解析（在来線も含む）
+    // ステップ構築: Yahooが返すroute全体をそのまま解析（在来線特急も含む）
     const steps     = [];
-    const lineNames = [];
+    const segments  = []; // { lineName, depStn, arrStn, depTime, arrTime }
 
     steps.push([yhTimeToHHMM(sumMove.DepartureTime), `${o.l}出発`]);
 
     for (const mv of detail) {
       if (String(mv.Type) !== '1') continue; // 徒歩スキップ
       const lineName = mv.TransportName || '鉄道';
-      lineNames.push(lineName);
-      steps.push([yhTimeToHHMM(mv.DepartureTime), `${mv.DepartureStation}発（${lineName}）`]);
-      steps.push([yhTimeToHHMM(mv.ArrivalTime),   `${mv.ArrivalStation}着`]);
+      const depT = yhTimeToHHMM(mv.DepartureTime);
+      const arrT = yhTimeToHHMM(mv.ArrivalTime);
+      segments.push({ lineName, depStn: mv.DepartureStation, arrStn: mv.ArrivalStation, depT, arrT });
+      steps.push([depT, `${mv.DepartureStation}発（${lineName}）`]);
+      steps.push([arrT, `${mv.ArrivalStation}着`]);
     }
-    if (!lineNames.length) continue;
+    if (!segments.length) continue;
 
     const arrHHMM = yhTimeToHHMM(sumMove.ArrivalTime);
     if (steps[steps.length - 1]?.[1] !== `${d.l}到着`) {
       steps.push([arrHHMM, `${d.l}到着`]);
+    }
+
+    // rideOnly: 乗換を含む分かりやすいルート表示（例: 新居浜→[サンポート]→坂出→[マリンライナー]→岡山→[のぞみ]→東京）
+    let rideOnly;
+    if (segments.length === 1) {
+      rideOnly = `${segments[0].depStn}→[${segments[0].lineName}]→${segments[0].arrStn}`;
+    } else {
+      rideOnly = segments[0].depStn + segments.map(s => `→[${s.lineName}]→${s.arrStn}`).join('');
     }
 
     // goTo: 最初の乗車便の出発駅・15分前（向かう時刻）
@@ -609,7 +619,7 @@ function parseYahooTransit(data, o, d) {
       type: 'shink',
       depTime:  depHHMM,
       arrTime:  arrHHMM,
-      rideOnly: lineNames.join(' → '),
+      rideOnly,
       totalMin,
       fare,
       steps,
@@ -1196,29 +1206,37 @@ async function searchSchedule() {
 
       let dataSource = 'est'; // 'yahoo', 'google', 'est'
 
-      // ① Yahoo!路線情報API（実運賃・実時刻）
-      try {
-        const data = await withTimeout(fetchYahooTransit(o, d, datetime, isArr), 12000);
-        if (data?.Feature?.length) {
-          scheds = parseYahooTransit(data, o, d);
-          dataSource = 'yahoo';
+      // ① Yahoo!路線情報API（実運賃・実時刻）- 最大2回試行
+      for (let attempt = 0; attempt < 2 && !scheds?.length; attempt++) {
+        try {
+          // 2回目は1時間後の便を検索（指定時刻の便が満席・運休等の場合のバックアップ）
+          const tryDatetime = attempt === 0 ? datetime : toYahooDatetime(searchDateStr, toHHMM(tMin + 60));
+          const data = await withTimeout(fetchYahooTransit(o, d, tryDatetime, isArr), 13000);
+          if (data?.Feature?.length) {
+            scheds = parseYahooTransit(data, o, d);
+            dataSource = 'yahoo';
+          }
+        } catch (e) {
+          if (e.message !== 'NO_KEY') console.warn(`Yahoo transit attempt${attempt + 1}:`, e.message);
         }
-      } catch (e) {
-        if (e.message !== 'NO_KEY') console.warn('Yahoo transit:', e.message);
       }
 
       // ② Google Maps transit（フォールバック）
       if (!scheds?.length) {
-        const data = await fetchBest('transit', o, d, ts, isArr, dateStr, timeStr);
-        if (data) {
-          scheds = data._fromSDK
-            ? parseTransitFromSDK(data, o, d)
-            : parseTransitFromREST(data, o, d);
-          dataSource = 'google';
+        try {
+          const data = await fetchBest('transit', o, d, ts, isArr, dateStr, timeStr);
+          if (data) {
+            scheds = data._fromSDK
+              ? parseTransitFromSDK(data, o, d)
+              : parseTransitFromREST(data, o, d);
+            dataSource = 'google';
+          }
+        } catch (e) {
+          console.warn('Google transit:', e.message);
         }
       }
 
-      // ③ 概算
+      // ③ 概算（Yahoo・Google両方失敗時のみ）
       if (!scheds?.length) scheds = genShinkSchedules(o, d, isArr, tMin);
 
       _scheds = scheds;
@@ -1296,9 +1314,10 @@ function renderSchedules(scheds, opts = {}) {
     <div class="sched-card" onclick="pickSchedule(${i})">
       <div class="sched-hdr">
         <span class="sched-time">${s.depTime} <span class="sched-arr">→</span> ${s.arrTime}</span>
-        <span class="sched-dur">${fmtM(s.totalMin)}</span>
+        <span class="sched-dur">${fmtM(s.totalMin)}${s.fare ? `　¥${fmt(s.fare)}` : ''}</span>
       </div>
       <div class="sched-ride">${s.rideOnly}</div>
+      ${!s.isReal ? '<div class="sched-est-note">📊 概算（実時刻はYahoo!乗換案内でご確認ください）</div>' : ''}
     </div>`).join('');
 
   const extBtn = extLink

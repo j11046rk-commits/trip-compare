@@ -415,7 +415,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .sched-time { font-size: 16px; font-weight: 600; color: var(--text); }
 .sched-arr  { color: var(--text3); font-weight: 400; }
 .sched-dur  { font-size: 11px; color: var(--text2); background: var(--bg3); padding: 2px 8px; border-radius: 20px; }
-.sched-ride { font-size: 11px; color: var(--text3); }
+.sched-ride { font-size: 11px; color: var(--text3); word-break: break-all; }
+.sched-est-note { font-size: 10px; color: var(--warn-text); margin-top: 3px; opacity: .8; }
 
 /* 最終ガイド */
 .final-box {

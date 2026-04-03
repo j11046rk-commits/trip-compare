@@ -66,7 +66,12 @@ module.exports = async (req, res) => {
       return res.status(200).json({ status: 'NO_RESULT', Feature: [] });
     }
 
-    console.log(`[yahoo-transit] 成功: ${features.length}件 / 先頭運賃:${features[0].Property.Summary.Move.Price[0].Amount}円 / 先頭時間:${features[0].Property.Summary.Move.Duration}分`);
+    const f0 = features[0].Property.Summary.Move;
+    const f0dep = f0.DepartureTime ? f0.DepartureTime.slice(8,10)+':'+f0.DepartureTime.slice(10,12) : '?';
+    const f0arr = f0.ArrivalTime   ? f0.ArrivalTime.slice(8,10)+':'+f0.ArrivalTime.slice(10,12)   : '?';
+    const f0detail = features[0].Property.Detail?.Move || [];
+    const f0route = f0detail.filter(m => m.Type==='1').map(m => m.TransportName||'鉄道').join('→');
+    console.log(`[yahoo-transit] 成功: ${features.length}件 / 先頭: ${f0dep}→${f0arr} (${f0.Duration}分) ¥${f0.Price?.[0]?.Amount} [${f0route}]`);
     res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ Feature: features, ResultInfo: { Status: 200 } });
 
@@ -117,21 +122,40 @@ function extractBySummaryRegex(html, dateStr) {
   return list;
 }
 
+// 路線品質スコア（低いほど優秀なルート）
+// 優先度: 乗り換え回数(少ない) > 特急/快速利用(あり) > 所要時間(短い) > 出発時刻(早い)
+function routeScore(feat) {
+  const edges = feat.edgeInfoList || [];
+  const railEdges = edges.filter(e => e.railName && e.railName.trim());
+  // 乗車区間数（=乗り換え回数+1）
+  const seg = railEdges.length || 99;
+
+  // 特急・快速・新幹線を含むルートかチェック
+  const hasExpress = railEdges.some(e => {
+    const n = e.railName || '';
+    return /特急|新幹線|しおかぜ|南風|宇和海|いしづち|あしずり|うずしお|剣山|あか|まりん|マリン|サンポート|快速|リレー|はやぶさ|のぞみ|ひかり|さくら|みずほ|つばめ|かもめ|ソニック|にちりん|きりしま|はやと|いぶたま|ゆふ|くろしお|はるか|雷鳥|サンダーバード|しらさぎ|ひだ|南紀|スーパー/.test(n);
+  });
+
+  const totalMin = parseJpTime(feat.summaryInfo?.totalTime || '');
+  const dep      = feat.summaryInfo?.departureTime || '23:59';
+
+  // スコア計算（数値が小さいほど良い）
+  return seg * 100000
+       + (hasExpress ? 0 : 50000)   // 特急なしは5万点ペナルティ
+       + totalMin * 10               // 所要時間（分）×10
+       + parseInt(dep.replace(':', ''));  // 出発時刻（HH:MM → 数値）
+}
+
 // featureInfoList → Yahoo! API Feature形式に変換
 function buildFeatures(featureInfoList, dateStr, fromStation, toStation) {
-  // 出発時刻の昇順にソートし、現実的な範囲（8時間以内）のみ対象にする
-  // ※Yahooの検索結果は指定時刻以降の便を返すため、出発時刻順が自然な表示順
+  // 乗り換え少・特急優先・所要時間短・出発時刻早 の順にソート
+  // 夜間接続切れ等の非現実的なルート（10時間超）は除外
   const sorted = featureInfoList
     .filter(f => {
       const t = parseJpTime(f.summaryInfo?.totalTime || '');
-      return t > 0 && t < 480; // 8時間以内のみ（長距離でも新幹線+在来線で8時間未満）
+      return t > 0 && t < 600; // 10時間以内（東京→鹿児島中央など長距離を考慮）
     })
-    .sort((a, b) => {
-      // 出発時刻の昇順（HH:MM 文字列比較）
-      const depA = a.summaryInfo?.departureTime || '00:00';
-      const depB = b.summaryInfo?.departureTime || '00:00';
-      return depA.localeCompare(depB);
-    });
+    .sort((a, b) => routeScore(a) - routeScore(b));
 
   const features = [];
 
