@@ -1193,7 +1193,8 @@ async function searchSchedule() {
   try {
     if (P.mode === 'shink') {
       let scheds = null;
-      // 指定日時が過去の場合は翌日同時刻で検索（Yahoo!は過去時刻に対し現在以降の便を返すため）
+
+      // 指定日時が過去の場合は翌日同時刻で検索
       const specifiedDt = makeDateObj(dateStr, timeStr);
       let searchDateStr = dateStr;
       let pastTimeNote = '';
@@ -1202,16 +1203,45 @@ async function searchSchedule() {
         searchDateStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth()+1).padStart(2,'0')}-${String(tomorrow.getDate()).padStart(2,'0')}`;
         pastTimeNote = `（※指定時刻が過去のため翌日 ${searchDateStr} の便を表示）`;
       }
-      const datetime = toYahooDatetime(searchDateStr, timeStr);
+
+      // ── Yahoo!検索用datetime・isArr の決定 ──────────────────────────
+      // Yahoo!のtype=4（到着時刻指定）は前日夜発・翌朝着の長時間ルートを返し
+      // 10時間フィルタで全件除外されて概算フォールバックになる問題を回避するため、
+      // 到着時刻指定の場合は「推定所要時間を逆算した出発時刻」でtype=1（出発時刻指定）に変換する。
+      let yahooDatetime, yahooIsArr;
+      if (!isArr) {
+        // 出発時刻指定: そのまま
+        yahooDatetime = toYahooDatetime(searchDateStr, timeStr);
+        yahooIsArr    = false;
+      } else {
+        // 到着時刻指定: 推定所要時間（+30分バッファ）を引いて出発時刻に変換
+        const estMin   = shinkMin1(o, d) + 30;          // 概算所要時間+30分余裕
+        const depMin   = tMin - estMin;
+        const depTime  = toHHMM(((depMin % 1440) + 1440) % 1440);
+        // 深夜を跨ぐ場合は前日日付
+        let depDateStr = searchDateStr;
+        if (depMin < 0) {
+          const prev = new Date(makeDateObj(searchDateStr, '00:00').getTime() - 86400000);
+          depDateStr = `${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}-${String(prev.getDate()).padStart(2,'0')}`;
+        }
+        yahooDatetime = toYahooDatetime(depDateStr, depTime);
+        yahooIsArr    = false; // type=1（出発時刻指定）に変換
+        pastTimeNote  = (pastTimeNote ? pastTimeNote + '　' : '')
+                      + `（到着 ${timeStr} から逆算・${depTime} 頃出発の便を検索）`;
+      }
 
       let dataSource = 'est'; // 'yahoo', 'google', 'est'
 
       // ① Yahoo!路線情報API（実運賃・実時刻）- 最大2回試行
       for (let attempt = 0; attempt < 2 && !scheds?.length; attempt++) {
         try {
-          // 2回目は1時間後の便を検索（指定時刻の便が満席・運休等の場合のバックアップ）
-          const tryDatetime = attempt === 0 ? datetime : toYahooDatetime(searchDateStr, toHHMM(tMin + 60));
-          const data = await withTimeout(fetchYahooTransit(o, d, tryDatetime, isArr), 13000);
+          // 2回目は30分後の出発便も検索（接続の関係で便がない場合のバックアップ）
+          const tryDatetime = attempt === 0
+            ? yahooDatetime
+            : toYahooDatetime(searchDateStr, toHHMM(
+                (!isArr ? tMin : tMin - shinkMin1(o, d) - 30) + 30
+              ));
+          const data = await withTimeout(fetchYahooTransit(o, d, tryDatetime, yahooIsArr), 13000);
           if (data?.Feature?.length) {
             scheds = parseYahooTransit(data, o, d);
             dataSource = 'yahoo';
@@ -1240,11 +1270,13 @@ async function searchSchedule() {
       if (!scheds?.length) scheds = genShinkSchedules(o, d, isArr, tMin);
 
       _scheds = scheds;
+      // 外部リンク: 到着時刻指定の場合もYahoo!にisarr=trueで渡す
       renderSchedules(scheds, {
         extLink: yahooTransitLink(o, d, searchDateStr, timeStr, isArr),
-        extLinkLabel: 'Yahoo!乗換案内で実際の時刻を確認',
+        extLinkLabel: isArr ? 'Yahoo!乗換案内で到着時刻指定の実際の時刻を確認' : 'Yahoo!乗換案内で実際の時刻を確認',
         dataSource,
         pastTimeNote,
+        isArr,
       });
 
     } else if (P.mode === 'fly') {
@@ -1288,14 +1320,15 @@ async function searchSchedule() {
 
 // ---- スケジュール表示 ----
 function renderSchedules(scheds, opts = {}) {
-  const { extLink, extLinkLabel, isFlight, dataSource, pastTimeNote } = opts;
+  const { extLink, extLinkLabel, isFlight, dataSource, pastTimeNote, isArr } = opts;
   const el = document.getElementById('schedule-list');
 
   const isReal = scheds.some(s => s.isReal);
   let banner = '';
   if (dataSource === 'yahoo') {
+    const arrNote = isArr ? '　※到着希望時刻から逆算した出発便を表示しています。' : '';
     const noteHtml = pastTimeNote ? `<div class="sched-banner est" style="margin-top:4px;">⚠️ ${pastTimeNote}</div>` : '';
-    banner = `<div class="sched-banner real">✅ Yahoo!乗換案内の実データを取得しました</div>${noteHtml}`;
+    banner = `<div class="sched-banner real">✅ Yahoo!乗換案内の実データを取得しました${arrNote}</div>${noteHtml}`;
   } else if (dataSource === 'google' || (isReal && !isFlight)) {
     banner = `<div class="sched-banner real">✅ Google Maps のリアルタイムデータを取得しました</div>`;
   } else if (isFlight) {
