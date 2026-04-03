@@ -221,6 +221,49 @@ function apName(pref)   { return (AP[pref] || { name: '最寄り空港' }).name;
 function apAccess(pref) { return (AP[pref] || { access: 60 }).access; }
 function apIata(pref)   { return (AP[pref] || {}).iata || ''; }
 
+// ---- 空港アクセス交通手段 ----
+const AP_TRANSIT = {
+  HND: '東京モノレール・京急線',
+  NRT: '成田エクスプレス・スカイライナー',
+  CTS: 'JR快速エアポート',
+  SDJ: '仙台空港アクセス線',
+  AOJ: 'バス（青森空港ライナー）',
+  HNA: 'バス（岩手県北バス）',
+  AXT: 'バス（秋田中央交通）',
+  GAJ: 'バス',
+  FKS: 'バス',
+  IBR: 'バス（関東鉄道）',
+  KIJ: 'バス',
+  TOY: 'バス（地鉄バス）',
+  KMQ: 'バス',
+  MMJ: 'バス（アルピコ交通）',
+  NGO: '名鉄空港線・リムジンバス',
+  FSZ: 'バス（しずてつジャストライン）',
+  ITM: '大阪モノレール・リムジンバス',
+  KIX: '南海電鉄・JR関空快速',
+  TTJ: 'バス（日ノ丸バス）',
+  IZO: 'バス',
+  OKJ: 'バス（リムジン）',
+  HIJ: 'バス（リムジン）',
+  UBJ: 'バス（防長バス）',
+  TKS: 'バス',
+  TAK: 'バス',
+  MYJ: 'バス（リムジン）',
+  KCZ: 'バス',
+  FUK: '地下鉄空港線',
+  HSG: 'バス',
+  NGS: 'バス・船（オーシャンアロー）',
+  KMJ: 'バス',
+  OIT: 'バス（大分交通）',
+  KMI: 'バス',
+  KOJ: 'バス（鹿児島交通）',
+  OKA: 'ゆいレール・バス',
+};
+function apTransit(pref) {
+  const iata = apIata(pref);
+  return AP_TRANSIT[iata] || 'バス・電車';
+}
+
 // ---- 交通手段判定 ----
 const canShink = (o, d) => o.hubStt !== null && d.hubStt !== null;
 const canFly   = (o, d, rd) => (o.hasAir || d.hasAir) && rd > 80;
@@ -718,6 +761,7 @@ function genAirSchedules(o, d, isArr, tMin, ld) {
   const flightMin = Math.max(40, Math.round(ld / 8));
   const accO = apAccess(o.pref), accD = apAccess(d.pref);
   const buf = 60, oAp = apName(o.pref), dAp = apName(d.pref);
+  const transitO = apTransit(o.pref), transitD = apTransit(d.pref);
   const totalMin = accO + buf + flightMin + accD;
   const baseCityDep = isArr ? tMin - totalMin : tMin;
   const baseFlightDep = baseCityDep + accO + buf;
@@ -732,14 +776,15 @@ function genAirSchedules(o, d, isArr, tMin, ld) {
     const cityArr = flightArr + accD;
     scheds.push({
       type: 'fly', depTime: toHHMM(cityDep), arrTime: toHHMM(cityArr),
-      rideOnly: `フライト ${toHHMM(flightDep)}発 → ${toHHMM(flightArr)}着（約${flightMin}分）`,
+      rideOnly: `${o.l} → [${transitO} 約${accO}分] → ${oAp} フライト ${toHHMM(flightDep)}発 → ${toHHMM(flightArr)}着（約${flightMin}分） → [${transitD} 約${accD}分] → ${d.l}`,
       totalMin, goTo: { time: toJP(cityDep), name: oAp },
       steps: [
-        [toHHMM(cityDep), `${o.l}出発`],
-        [toHHMM(cityDep + accO), `${oAp}到着・チェックイン`],
+        [toHHMM(cityDep), `${o.l}出発（${transitO}で${oAp}へ 約${accO}分）`],
+        [toHHMM(cityDep + accO), `${oAp}到着・チェックイン（出発60分前）`],
         [toHHMM(flightDep - 20), `搭乗ゲートへ移動`],
-        [toHHMM(flightDep), `${oAp}発（フライト 約${flightMin}分）`],
-        [toHHMM(flightArr), `${dAp}着`],
+        [toHHMM(flightDep), `${oAp}出発（フライト 約${flightMin}分）`],
+        [toHHMM(flightArr), `${dAp}到着`],
+        [toHHMM(flightArr + 10), `${dAp}出発（${transitD}で${d.l}へ 約${accD}分）`],
         [toHHMM(cityArr), `${d.l}到着`],
       ],
       isReal: false,
@@ -1299,6 +1344,9 @@ async function searchSchedule() {
             const accD = apAccess(d.pref);
             const oAp  = apName(o.pref);
             const dAp  = apName(d.pref);
+            const transitO = apTransit(o.pref);
+            const transitD = apTransit(d.pref);
+            const accOraw  = apAccess(o.pref); // 空港までの移動時間（チェックイン60分は別）
             scheds = data.flights.map(f => {
               const depMin  = parseMin(f.dep);
               const arrMin  = depMin + f.durationMin;
@@ -1307,19 +1355,22 @@ async function searchSchedule() {
               const goMin   = cityDep - 15;
               const normalFmt = `¥${fmt(f.normalFare)}`;
               const earlyFmt  = `¥${fmt(f.earlyFare)}〜`;
+              const apDepTime = toHHMM(((depMin - 60)%1440+1440)%1440); // 空港到着（60分前）
+              const apArrTime = f.arr;
               return {
                 type: 'fly',
                 depTime: toHHMM(((cityDep % 1440)+1440)%1440),
                 arrTime: toHHMM(((cityArr % 1440)+1440)%1440),
-                rideOnly: `${f.airline} ${oAp} ${f.dep}発 → ${dAp} ${f.arr}着（${f.durationMin}分）　正規${normalFmt} / 早割${earlyFmt}`,
+                rideOnly: `${o.l} → [${transitO} 約${accOraw}分] → ${oAp} ${f.dep}発 （${f.airline}・${f.durationMin}分） → ${dAp} ${f.arr}着 → [${transitD} 約${accD}分] → ${d.l}　早割${earlyFmt} / 正規${normalFmt}`,
                 totalMin: accO + f.durationMin + accD,
                 fare: f.earlyFare,
                 steps: [
-                  [toHHMM(((cityDep%1440)+1440)%1440), `${o.l}出発`],
-                  [toHHMM(((depMin - 60)%1440+1440)%1440), `${oAp}到着・チェックイン`],
-                  [toHHMM(((depMin - 20)%1440+1440)%1440), `搭乗ゲートへ`],
-                  [f.dep, `${oAp}発（${f.airline}）`],
-                  [f.arr, `${dAp}着`],
+                  [toHHMM(((cityDep%1440)+1440)%1440), `${o.l}出発（${transitO}で${oAp}へ 約${accOraw}分）`],
+                  [apDepTime, `${oAp}到着・チェックイン（出発60分前）`],
+                  [toHHMM(((depMin - 20)%1440+1440)%1440), `搭乗ゲートへ移動`],
+                  [f.dep, `${oAp}出発（${f.airline}）`],
+                  [f.arr, `${dAp}到着`],
+                  [toHHMM(((arrMin + 10)%1440+1440)%1440), `${dAp}出発（${transitD}で${d.l}へ 約${accD}分）`],
                   [toHHMM(((cityArr%1440)+1440)%1440), `${d.l}到着`],
                 ],
                 goTo: { time: toJP(((goMin%1440)+1440)%1440), name: oAp },
