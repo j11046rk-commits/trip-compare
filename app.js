@@ -1280,12 +1280,77 @@ async function searchSchedule() {
       });
 
     } else if (P.mode === 'fly') {
-      const scheds = genAirSchedules(o, d, isArr, tMin, ld);
+      const oIata = apIata(o.pref);
+      const dIata = apIata(d.pref);
+      let scheds = null;
+      let flightDataSource = 'est';
+
+      // ① 参考ダイヤDB（主要路線は実便時刻を表示）
+      if (oIata && dIata) {
+        try {
+          const dtStr = dateStr.replace(/-/g,'') + timeStr.replace(':','');
+          const res  = await withTimeout(
+            fetch(`/api/flight-schedule?from=${oIata}&to=${dIata}&datetime=${dtStr}&isarr=${isArr}`),
+            8000
+          );
+          const data = await res.json();
+          if (data.status === 'OK' && data.flights?.length) {
+            const accO = apAccess(o.pref) + 60; // 空港アクセス+チェックイン60分
+            const accD = apAccess(d.pref);
+            const oAp  = apName(o.pref);
+            const dAp  = apName(d.pref);
+            scheds = data.flights.map(f => {
+              const depMin  = parseMin(f.dep);
+              const arrMin  = depMin + f.durationMin;
+              const cityDep = depMin - accO;
+              const cityArr = arrMin + accD;
+              const goMin   = cityDep - 15;
+              const normalFmt = `¥${fmt(f.normalFare)}`;
+              const earlyFmt  = `¥${fmt(f.earlyFare)}〜`;
+              return {
+                type: 'fly',
+                depTime: toHHMM(((cityDep % 1440)+1440)%1440),
+                arrTime: toHHMM(((cityArr % 1440)+1440)%1440),
+                rideOnly: `${f.airline} ${oAp} ${f.dep}発 → ${dAp} ${f.arr}着（${f.durationMin}分）　正規${normalFmt} / 早割${earlyFmt}`,
+                totalMin: accO + f.durationMin + accD,
+                fare: f.earlyFare,
+                steps: [
+                  [toHHMM(((cityDep%1440)+1440)%1440), `${o.l}出発`],
+                  [toHHMM(((depMin - 60)%1440+1440)%1440), `${oAp}到着・チェックイン`],
+                  [toHHMM(((depMin - 20)%1440+1440)%1440), `搭乗ゲートへ`],
+                  [f.dep, `${oAp}発（${f.airline}）`],
+                  [f.arr, `${dAp}着`],
+                  [toHHMM(((cityArr%1440)+1440)%1440), `${d.l}到着`],
+                ],
+                goTo: { time: toJP(((goMin%1440)+1440)%1440), name: oAp },
+                isReal: true,
+                _source: 'flight_db',
+                _flightInfo: f,
+              };
+            });
+            flightDataSource = 'flight_db';
+          }
+        } catch (e) {
+          console.warn('flight-schedule:', e.message);
+        }
+      }
+
+      // ② 概算フォールバック
+      if (!scheds?.length) scheds = genAirSchedules(o, d, isArr, tMin, ld);
+
       _scheds = scheds;
+      const anaUrl = oIata && dIata
+        ? `https://www.ana.co.jp/ja/jp/domair/search/?departure=${oIata}&arrival=${dIata}&depDate=${dateStr.replace(/-/g,'')}&adt=1`
+        : null;
+      const jalUrl = oIata && dIata
+        ? `https://www.jal.co.jp/jp/ja/domair/search/?from=${oIata}&to=${dIata}&date=${dateStr.replace(/-/g,'')}&adt=1`
+        : null;
       renderSchedules(scheds, {
         extLink: googleFlightsLink(o, d, dateStr),
-        extLinkLabel: 'Google Flightsで実際の便を検索',
-        isFlight: true,
+        extLinkLabel: 'Google Flightsで空席・最安値を確認',
+        isFlight: flightDataSource === 'est',
+        dataSource: flightDataSource,
+        anaUrl, jalUrl,
       });
 
     } else if (P.mode === 'car') {
@@ -1320,7 +1385,7 @@ async function searchSchedule() {
 
 // ---- スケジュール表示 ----
 function renderSchedules(scheds, opts = {}) {
-  const { extLink, extLinkLabel, isFlight, dataSource, pastTimeNote, isArr } = opts;
+  const { extLink, extLinkLabel, isFlight, dataSource, pastTimeNote, isArr, anaUrl, jalUrl } = opts;
   const el = document.getElementById('schedule-list');
 
   const isReal = scheds.some(s => s.isReal);
@@ -1329,6 +1394,8 @@ function renderSchedules(scheds, opts = {}) {
     const arrNote = isArr ? '　※到着希望時刻から逆算した出発便を表示しています。' : '';
     const noteHtml = pastTimeNote ? `<div class="sched-banner est" style="margin-top:4px;">⚠️ ${pastTimeNote}</div>` : '';
     banner = `<div class="sched-banner real">✅ Yahoo!乗換案内の実データを取得しました${arrNote}</div>${noteHtml}`;
+  } else if (dataSource === 'flight_db') {
+    banner = `<div class="sched-banner real">✈️ 参考ダイヤ（ANA/JAL時刻表ベース）を表示しています。料金・運航状況は下のリンクでご確認ください。</div>`;
   } else if (dataSource === 'google' || (isReal && !isFlight)) {
     banner = `<div class="sched-banner real">✅ Google Maps のリアルタイムデータを取得しました</div>`;
   } else if (isFlight) {
@@ -1356,8 +1423,14 @@ function renderSchedules(scheds, opts = {}) {
   const extBtn = extLink
     ? `<a class="ext-link-btn" href="${extLink}" target="_blank" rel="noopener">🔗 ${extLinkLabel || '外部サイトで確認'}</a>`
     : '';
+  const anaBtn = anaUrl
+    ? `<a class="ext-link-btn" style="background:#2469b2;" href="${anaUrl}" target="_blank" rel="noopener">✈️ ANAで空席・予約確認</a>`
+    : '';
+  const jalBtn = jalUrl
+    ? `<a class="ext-link-btn" style="background:#d40000;" href="${jalUrl}" target="_blank" rel="noopener">✈️ JALで空席・予約確認</a>`
+    : '';
 
-  el.innerHTML = banner + cards + extBtn;
+  el.innerHTML = banner + cards + extBtn + anaBtn + jalBtn;
   document.getElementById('plan-step4').style.display = 'block';
   document.getElementById('plan-step5').style.display = 'none';
   document.getElementById('plan-step4').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
