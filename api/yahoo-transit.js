@@ -126,15 +126,30 @@ function extractBySummaryRegex(html, dateStr) {
 // 優先度: 乗り換え回数(少ない) > 特急/快速利用(あり) > 所要時間(短い) > 出発時刻(早い)
 function routeScore(feat) {
   const edges = feat.edgeInfoList || [];
-  const railEdges = edges.filter(e => e.railName && e.railName.trim());
-  // 乗車区間数（=乗り換え回数+1）
-  const seg = railEdges.length || 99;
+  // 【重要】edgeInfoListは中間駅も含む全停車駅をエッジとして返す場合がある。
+  // そのため「同一路線名の連続エッジ」を1路線としてカウントし、
+  // 乗車路線数（=乗換回数+1）を正確に計算する。
+  // 例: しおかぜ(8駅分のエッジ) + のぞみ(7駅分のエッジ) → seg=2（正解）
+  //     単純カウントだと seg=15 になり普通列車ルートに負けてしまう
+  let seg = 0;
+  let prevLine = null;
+  let hasExpress = false;
+  const EXP_RE = /特急|新幹線|しおかぜ|南風|宇和海|いしづち|あしずり|うずしお|剣山|あか|まりん|マリン|サンポート|快速|リレー|はやぶさ|のぞみ|ひかり|さくら|みずほ|つばめ|かもめ|ソニック|にちりん|きりしま|はやと|いぶたま|ゆふ|くろしお|はるか|雷鳥|サンダーバード|しらさぎ|ひだ|南紀|スーパー/;
 
-  // 特急・快速・新幹線を含むルートかチェック
-  const hasExpress = railEdges.some(e => {
-    const n = e.railName || '';
-    return /特急|新幹線|しおかぜ|南風|宇和海|いしづち|あしずり|うずしお|剣山|あか|まりん|マリン|サンポート|快速|リレー|はやぶさ|のぞみ|ひかり|さくら|みずほ|つばめ|かもめ|ソニック|にちりん|きりしま|はやと|いぶたま|ゆふ|くろしお|はるか|雷鳥|サンダーバード|しらさぎ|ひだ|南紀|スーパー/.test(n);
-  });
+  for (const e of edges) {
+    const n = (e.railName || '').trim();
+    if (n) {
+      if (n !== prevLine) {
+        seg++;          // 新しい路線に乗り換え
+        prevLine = n;
+        if (EXP_RE.test(n)) hasExpress = true;
+      }
+      // 同一路線の継続エッジはカウントしない
+    } else {
+      prevLine = null; // 徒歩等（railNameなし）で路線区切りをリセット
+    }
+  }
+  if (!seg) seg = 99;
 
   const totalMin = parseJpTime(feat.summaryInfo?.totalTime || '');
   const dep      = feat.summaryInfo?.departureTime || '23:59';
@@ -172,38 +187,50 @@ function buildFeatures(featureInfoList, dateStr, fromStation, toStation) {
     const depFull = toYahooFmt(dateStr, si.departureTime);
     const arrFull = toYahooFmt(dateStr, si.arrivalTime, si.departureTime);
 
-    // edgeInfoList から全乗車区間を構築
+    // edgeInfoList から乗車区間を構築（中間駅グループ化対応）
     // pointIcon: 0=最初の乗車駅, 3=乗換で次の電車に乗る駅, 2=乗換到着のみ, 1=最終到着
     // timeInfo.type: 3=単一イベント, 2=到着(乗換前), 1=出発(乗換後)
+    // 【修正】同一railNameの連続エッジ（中間停車駅）を1路線としてまとめる
     const detailMoves = [];
     const edges = feat.edgeInfoList || [];
 
-    for (let i = 0; i < edges.length - 1; i++) {
-      const edge     = edges[i];
-      const nextEdge = edges[i + 1];
+    let i = 0;
+    while (i < edges.length) {
+      const edge = edges[i];
+      const n = (edge.railName || '').trim();
 
-      // railNameがない区間（徒歩等）はスキップ
-      if (!edge.railName) continue;
+      if (!n) { i++; continue; } // 徒歩等はスキップ
 
-      // この区間の出発時刻: type:3（単一）またはtype:1（乗換後出発）
+      // この路線の出発情報（乗車駅のエッジ）
       const depInfo = edge.timeInfo?.find(t => t.type === 3) ||
                       edge.timeInfo?.find(t => t.type === 1);
-      if (!depInfo) continue;
+      if (!depInfo) { i++; continue; }
 
-      // 次駅への到着時刻: type:2（乗換前到着）またはtype:3（最終到着）
+      // 同一railNameの連続エッジ（中間停車駅）をまとめてスキップ
+      let j = i + 1;
+      while (j < edges.length && (edges[j].railName || '').trim() === n) {
+        j++;
+      }
+
+      // 次の路線または終着のエッジ
+      const nextEdge = j < edges.length ? edges[j] : null;
+      if (!nextEdge) { i = j; continue; }
+
       const arrInfo = nextEdge.timeInfo?.find(t => t.type === 2) ||
                       nextEdge.timeInfo?.find(t => t.type === 3) ||
                       nextEdge.timeInfo?.[0];
-      if (!arrInfo) continue;
+      if (!arrInfo) { i = j; continue; }
 
       detailMoves.push({
         Type:             '1',
-        TransportName:    edge.railName,
-        DepartureStation: edge.pointName  || edge.stationName  || fromStation,
+        TransportName:    n,
+        DepartureStation: edge.pointName     || edge.stationName     || fromStation,
         ArrivalStation:   nextEdge.pointName || nextEdge.stationName || toStation,
         DepartureTime:    toYahooFmt(dateStr, depInfo.time),
         ArrivalTime:      toYahooFmt(dateStr, arrInfo.time, depInfo.time),
       });
+
+      i = j; // 次の路線グループへ
     }
 
     // edgeInfoListが空の場合は1ステップの概略を構築
